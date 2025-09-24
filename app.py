@@ -1,13 +1,13 @@
 import eventlet
 eventlet.monkey_patch()  # должно быть ПЕРВЫМ
 
-from flask import Flask, request
+from flask import Flask, request, send_from_directory, jsonify
 from flask_socketio import SocketIO
 import random
 from api.routes import api_bp
 import requests
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="templates/laserMain", static_url_path="")
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Подключаем Blueprint с API
@@ -23,6 +23,11 @@ def log_request_info():
 @app.route("/")
 def home():
     return "Flask + Socket.IO server running on port 5005!"
+
+
+@app.route("/lasermain")
+def mainLaser():
+    return send_from_directory(app.static_folder, "index.html")
 
 def generate_machine_data():
     """Фоновый таск, отправляет данные каждые 1 сек"""
