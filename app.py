@@ -1,12 +1,24 @@
 import eventlet
 eventlet.monkey_patch()  # должно быть ПЕРВЫМ
 
-from flask import Flask
+from flask import Flask, request
 from flask_socketio import SocketIO
 import random
+from api.routes import api_bp
+import requests
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Подключаем Blueprint с API
+app.register_blueprint(api_bp, url_prefix="/api")
+
+
+
+""" @app.before_request
+def log_request_info():
+    print(f"➡️ {request.method} {request.path} | args={dict(request.args)}") """
+    
 
 @app.route("/")
 def home():
@@ -34,4 +46,4 @@ def handle_disconnect():
     print("Client disconnected")
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5005)
+    socketio.run(app, host="0.0.0.0", port=5005, debug=True)
