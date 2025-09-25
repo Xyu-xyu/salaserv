@@ -3,7 +3,7 @@ import requests
 
 api_bp = Blueprint("api", __name__)
 
-EXTERNAL_API = "http://192.168.11.4"
+EXTERNAL_API = "http://192.168.11.6"
 
 
 @api_bp.route("/loadresult", methods=["GET"])
@@ -58,4 +58,35 @@ def upload_gcode(core: int):
         return jsonify({"status": "ok", "external_status": resp.status_code})
     except requests.RequestException as e:
         return jsonify({"error": f"External server error: {str(e)}"}), 502
+    
 
+
+@api_bp.route("/cut-settings", methods=["GET"])
+def get_cut_settings():
+    """Прокси для cut_settings/settings?gcore=0"""
+    try:
+        url = f"{EXTERNAL_API}/cut_settings/settings?gcore=0"
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()  # JSON от внешнего сервера
+        return jsonify(data)  # Возвращаем как JSON
+    except requests.Timeout:
+        return jsonify({"error": "Внешний сервер не отвечает"}), 504
+    except requests.RequestException as e:
+        return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
+    
+
+
+@api_bp.route("/cut-settings-schema", methods=["GET"])
+def get_cut_settings_schema():
+    """Прокси для cut_settings_schema"""
+    try:
+        url = f"{EXTERNAL_API}/cut_settings/schema?gcore=0"
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()  # JSON от внешнего сервера
+        return jsonify(data)  # Возвращаем как JSON
+    except requests.Timeout:
+        return jsonify({"error": "Внешний сервер не отвечает"}), 504
+    except requests.RequestException as e:
+        return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
