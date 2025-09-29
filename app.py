@@ -1,5 +1,5 @@
-import eventlet
-eventlet.monkey_patch()  # должно быть ПЕРВЫМ
+import eventlet 
+eventlet.monkey_patch()  
 
 from flask import Flask, request, send_from_directory, jsonify
 from flask_socketio import SocketIO

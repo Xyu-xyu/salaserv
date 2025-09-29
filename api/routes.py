@@ -1,9 +1,46 @@
 from flask import Blueprint, request, jsonify, Response
+import os, json
 import requests
 
 api_bp = Blueprint("api", __name__)
 
-EXTERNAL_API = "http://192.168.11.6"
+EXTERNAL_API = "http://192.168.11.7"
+
+from flask import Blueprint, request, jsonify
+import os, json
+
+api_bp = Blueprint("api", __name__)
+
+SAVE_DIR = "/home/woodver/preset"   # Папка для сохранения пресетов
+
+
+@api_bp.route("/savepreset", methods=["POST"])
+def save_preset():
+    try:
+        # Парсим входящий JSON
+        data = request.get_json(force=True)
+
+        # Проверка структуры
+        material = data.get("material", {})
+        code = material.get("name")
+        thickness = material.get("thickness")
+
+        if not code or thickness is None:
+            return jsonify({"error": "Неверный JSON, нужны material.code и material.thickness"}), 400
+
+        # Формируем имя файла
+        filename = f"{code}_{thickness}.json"
+        filepath = os.path.join(SAVE_DIR, filename)
+
+        # Сохраняем в файл
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        return jsonify({"success": True, "file": filepath})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 @api_bp.route("/loadresult", methods=["GET"])
@@ -61,21 +98,32 @@ def upload_gcode(core: int):
     
 
 
-@api_bp.route("/cut-settings", methods=["GET"])
-def get_cut_settings():
-    """Прокси для cut_settings/settings?gcore=0"""
+@api_bp.route("/cut-settings", methods=["GET", "PUT", "DELETE"])
+def cut_settings():
+    """Прокси для cut_settings/settings"""
     try:
-        url = f"{EXTERNAL_API}/cut_settings/settings?gcore=0"
-        resp = requests.get(url, timeout=5)
+        url = f"{EXTERNAL_API}/cut_settings/settings"
+        params = {"gcore": 0}
+
+        if request.method == "GET":
+            resp = requests.get(url, params=params, timeout=5)
+        elif request.method == "PUT":
+            # пересылаем JSON в тело
+            resp = requests.put(url, params=params, json=request.json, timeout=5)
+        elif request.method == "DELETE":
+            resp = requests.delete(url, params=params, timeout=5)
+        else:
+            return jsonify({"error": "Метод не поддерживается"}), 405
+
         resp.raise_for_status()
-        data = resp.json()  # JSON от внешнего сервера
-        return jsonify(data)  # Возвращаем как JSON
+        data = resp.json()
+        return jsonify(data)
+
     except requests.Timeout:
         return jsonify({"error": "Внешний сервер не отвечает"}), 504
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
-
 
 @api_bp.route("/cut-settings-schema", methods=["GET"])
 def get_cut_settings_schema():
@@ -90,3 +138,6 @@ def get_cut_settings_schema():
         return jsonify({"error": "Внешний сервер не отвечает"}), 504
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
+    
+
+
