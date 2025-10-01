@@ -1,17 +1,19 @@
 from flask import Blueprint, request, jsonify, Response
 import os, json
 import requests
+import config
 
 api_bp = Blueprint("api", __name__)
 
-EXTERNAL_API = "http://192.168.11.7"
+EXTERNAL_API = config.EXTERNAL_API
 
 from flask import Blueprint, request, jsonify
 import os, json
 
 api_bp = Blueprint("api", __name__)
 
-SAVE_DIR = "/home/woodver/preset"   # Папка для сохранения пресетов
+SAVE_DIR = config.SAVE_DIR
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 
 @api_bp.route("/savepreset", methods=["POST"])
@@ -59,6 +61,7 @@ def get_load_result():
         return jsonify({"error": f"External server error: {str(e)}"}), 502
 
 
+
 @api_bp.route("/listing", methods=["GET"])
 def get_listing():
     """Прокси для получения G-code listing"""
@@ -72,6 +75,7 @@ def get_listing():
     except requests.RequestException as e:
         return Response(f"External server error: {str(e)}", status=502, mimetype="text/plain")
     
+
 
 @api_bp.route("/gcore/<int:core>/upload", methods=["POST"])
 def upload_gcode(core: int):
@@ -95,7 +99,7 @@ def upload_gcode(core: int):
         return jsonify({"status": "ok", "external_status": resp.status_code})
     except requests.RequestException as e:
         return jsonify({"error": f"External server error: {str(e)}"}), 502
-    
+
 
 
 @api_bp.route("/cut-settings", methods=["GET", "PUT", "DELETE"])
@@ -125,6 +129,7 @@ def cut_settings():
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
 
+
 @api_bp.route("/cut-settings-schema", methods=["GET"])
 def get_cut_settings_schema():
     """Прокси для cut_settings_schema"""
@@ -140,4 +145,19 @@ def get_cut_settings_schema():
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
 
+
+@api_bp.route("/gcore/<int:gcore_num>/execute", methods=["GET"])
+def proxy_execute(gcore_num):
+    """Прокси для gcore/{gcore_num}/execute"""
+    try:
+        url = f"{EXTERNAL_API}/gcore/{gcore_num}/execute"
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        return resp.text  # просто возвращаем текст от удалённого сервера
+
+    except requests.Timeout:
+        return jsonify({"error": "Внешний сервер не отвечает"}), 504
+    except requests.RequestException as e:
+        return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
+    
 
