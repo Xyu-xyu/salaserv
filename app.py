@@ -5,6 +5,7 @@ from flask import Flask, request, send_from_directory, jsonify
 from flask_socketio import SocketIO
 import random
 from api.routes import api_bp
+from api.presets import preset_bp 
 import requests
 import config
 
@@ -13,6 +14,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Подключаем Blueprint с API
 app.register_blueprint(api_bp, url_prefix="/api")
+app.register_blueprint(preset_bp, url_prefix="/db")
+
 
 EXTERNAL_API = config.EXTERNAL_API
 

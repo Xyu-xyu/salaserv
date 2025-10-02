@@ -3,16 +3,11 @@ import os, json
 import requests
 import config
 
-api_bp = Blueprint("api", __name__)
-
-EXTERNAL_API = config.EXTERNAL_API
-
-from flask import Blueprint, request, jsonify
-import os, json
 
 api_bp = Blueprint("api", __name__)
 
 SAVE_DIR = config.SAVE_DIR
+EXTERNAL_API = config.EXTERNAL_API
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 
@@ -160,4 +155,3 @@ def proxy_execute(gcore_num):
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
-
