@@ -70,7 +70,7 @@ def api_save_preset():
     """Создать новый пресет"""
     try:
         data = request.get_json(force=True)
-        code = data["material"]["code"]
+        code = data["material"]["name"]
         thickness = data["material"]["thickness"]
         name = data.get("name") or f"{code}_{thickness}"
 
@@ -98,7 +98,7 @@ def api_update_preset():
         if not preset_id:
             return jsonify({"status": "error", "msg": "id required"}), 400
 
-        code = data["material"]["code"]
+        code = data["material"]["name"]
         thickness = data["material"]["thickness"]
         name = data.get("name") or f"{code}_{thickness}"
         preset_json = json.dumps(data)
@@ -167,7 +167,7 @@ def api_copy_preset():
             return jsonify({"status": "error", "msg": "Preset not found or deleted"}), 404
 
         old_name, code, thickness, preset_json = row
-        new_name = f"{old_name}_copy"
+        new_name = f"{old_name}"
 
         c.execute("""
             INSERT INTO presets (name, code, thickness, preset, status, ts)
@@ -193,5 +193,37 @@ def api_delete_all_presets():
         conn.commit()
         conn.close()
         return jsonify({"status": "ok", "msg": "All presets deleted"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "msg": str(e)}), 500
+
+
+@preset_bp.route("/get_preset", methods=["GET"])
+def api_get_preset():
+    """Получить один пресет по id"""
+    preset_id = request.args.get("id")
+    if not preset_id:
+        return jsonify({"status": "error", "msg": "id required"}), 400
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, name, code, thickness, preset, ts, status FROM presets WHERE id=?", (preset_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({"status": "error", "msg": f"Preset {preset_id} not found"}), 404
+
+        preset_data = {
+            "id": row[0],
+            "name": row[1],
+            "code": row[2],
+            "thickness": row[3],
+            "preset": json.loads(row[4]),
+            "ts": row[5],
+            "status": row[6],
+        }
+        return jsonify(preset_data), 200
+
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
