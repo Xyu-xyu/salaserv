@@ -107,8 +107,13 @@ def cut_settings():
         if request.method == "GET":
             resp = requests.get(url, params=params, timeout=5)
         elif request.method == "PUT":
-            # пересылаем JSON в тело
-            resp = requests.put(url, params=params, json=request.json, timeout=5)
+            try:
+                data = request.get_json(force=True)  # получаем тело запроса
+            except Exception:
+                data = None
+                
+            resp = requests.put(url, params=params, json=data, timeout=5)
+
         elif request.method == "DELETE":
             resp = requests.delete(url, params=params, timeout=5)
         else:
