@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, Response
-import os, json
+import os, json, re
 import requests
 import config
 
@@ -9,6 +9,8 @@ api_bp = Blueprint("api", __name__)
 SAVE_DIR = config.SAVE_DIR
 EXTERNAL_API = config.EXTERNAL_API
 os.makedirs(SAVE_DIR, exist_ok=True)
+TRANSLATIONS_DIR = "/home/woodver/salaser/src/scripts/translations"
+
 
 
 @api_bp.route("/savepreset", methods=["POST"])
@@ -160,3 +162,63 @@ def proxy_execute(gcore_num):
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
+
+def read_tsx_translations(file_path):
+    """Читает объект из tsx-файла и возвращает словарь переводов"""
+    translations = {}
+    if not os.path.exists(file_path):
+        return translations
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        # Находим все строки вида "ключ": "значение",
+        matches = re.findall(r'"(.*?)"\s*:\s*"(.*?)"', content, re.DOTALL)
+        for k, v in matches:
+            translations[k] = v
+    return translations
+
+def write_tsx_translations(file_path, translations, lang):
+    """Записывает словарь переводов обратно в tsx-файл"""
+    lines = [f'const {lang}: Record<string, string> = {{']
+    for key, value in translations.items():
+        lines.append(f'\t"{key}": "{value}",')
+    lines.append('}')
+    lines.append(f'export default {lang};')
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+@api_bp.route("/translate", methods=["GET"])
+def translate_phrase():
+    phrase = request.args.get("phrase")
+    if not phrase:
+        return jsonify({"error": "Missing 'phrase' parameter"}), 400
+
+    results = {}
+
+    # Перебираем все tsx-файлы в папке translations
+    for filename in os.listdir(TRANSLATIONS_DIR):
+        if filename.endswith(".tsx"):
+            lang = filename.split(".")[0]
+            file_path = os.path.join(TRANSLATIONS_DIR, filename)
+
+            translations = read_tsx_translations(file_path)
+
+            # Для английского просто дублируем
+            if lang == "en":
+                translations[phrase] = phrase
+                results[lang] = phrase
+            else:
+                url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl={lang}&dt=t&q={requests.utils.quote(phrase)}"
+                try:
+                    r = requests.get(url)
+                    r.raise_for_status()
+                    data = r.json()
+                    translated_text = data[0][0][0] if data and len(data) > 0 else phrase
+                    translations[phrase] = translated_text
+                    results[lang] = translated_text
+                except Exception:
+                    translations[phrase] = phrase
+                    results[lang] = phrase
+
+            write_tsx_translations(file_path, translations, lang)
+
+    return jsonify(results)
