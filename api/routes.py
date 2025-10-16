@@ -6,9 +6,7 @@ import config
 
 api_bp = Blueprint("api", __name__)
 
-SAVE_DIR = config.SAVE_DIR
 EXTERNAL_API = config.EXTERNAL_API
-os.makedirs(SAVE_DIR, exist_ok=True)
 TRANSLATIONS_DIR = "/home/woodver/salaser/src/scripts/translations"
 
 
@@ -208,6 +206,7 @@ def translate_phrase():
                 results[lang] = phrase
             else:
                 url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl={lang}&dt=t&q={requests.utils.quote(phrase)}"
+                print(f"[DEBUG] Переводим '{phrase}' → язык {lang} (url={url})")
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
