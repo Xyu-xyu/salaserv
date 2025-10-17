@@ -32,6 +32,9 @@ def main():
 def mainLaser():
     return send_from_directory(app.static_folder, "index.html")
 
+background_task_started = False
+
+
 def generate_machine_data():
     """Фоновый таск, отправляет данные каждые 1 сек"""
     while True:
@@ -49,28 +52,35 @@ def generate_machine_data():
             ]
 
         except (requests.RequestException, IndexError, KeyError):
-            # Если не удалось получить данные, отправляем рандомные как раньше
+            # Если не удалось получить данные, отправляем рандомные
             data = [
                 {"name": "X", "measure": "mm", "val": round(random.uniform(0, 300), 2)},
                 {"name": "Y", "measure": "mm", "val": round(random.uniform(0, 1500), 2)},
                 {"name": "Z", "measure": "mm", "val": round(random.uniform(0, 30), 2)},
             ]
 
-        # Отправляем клиентам через SocketIO
+        # Отправляем всем подключённым клиентам через SocketIO
         socketio.emit("machine_data", data)
         socketio.sleep(1)  # корректно с eventlet
 
+
 @socketio.on("connect")
 def handle_connect():
+    global background_task_started
     print("Client connected")
-    # запускаем генерацию данных в фоне через socketio
-    socketio.start_background_task(generate_machine_data)
+
+    # Запускаем фоновый таск только один раз
+    if not background_task_started:
+        socketio.start_background_task(generate_machine_data)
+        background_task_started = True
+
 
 @socketio.on("disconnect")
 def handle_disconnect():
     print("Client disconnected")
 
+
 if __name__ == "__main__":
-    """ socketio.run(app, host="0.0.0.0", port=5005, debug=True) """
+    # use_reloader=False важен, чтобы не запускать сервер дважды в dev
     socketio.run(app, host="0.0.0.0", port=5005, debug=True, use_reloader=False)
 
