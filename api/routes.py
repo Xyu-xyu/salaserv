@@ -8,6 +8,13 @@ api_bp = Blueprint("api", __name__)
 
 EXTERNAL_API = config.EXTERNAL_API
 TRANSLATIONS_DIR = "/home/woodver/salaser/src/scripts/translations"
+FUNCTIONS_FILE = "functions.json"
+
+
+# Если файла нет — создаём пустой по умолчанию
+if not os.path.exists(FUNCTIONS_FILE):
+    with open(FUNCTIONS_FILE, 'w', encoding='utf-8') as f:
+        json.dump([], f, ensure_ascii=False, indent=2)
 
 
 
@@ -221,3 +228,37 @@ def translate_phrase():
             write_tsx_translations(file_path, translations, lang)
 
     return jsonify(results)
+
+
+@api_bp.route("/get_functions", methods=["GET"])
+def get_functions():
+
+    try:
+        if not os.path.exists(FUNCTIONS_FILE):
+            return jsonify({"error": "File not found"}), 404
+
+        with open(FUNCTIONS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        return jsonify(data)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/save_functions", methods=["POST"])
+def save_functions():
+    try:
+        data = request.get_json(force=True)
+
+        # Можно валидировать структуру, если нужно
+        # if "functions" not in data or not isinstance(data["functions"], list):
+        #     return jsonify({"error": "Invalid data format"}), 400
+
+        with open(FUNCTIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "success", "message": "Functions saved successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

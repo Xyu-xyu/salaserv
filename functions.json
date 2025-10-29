@@ -1,0 +1,52 @@
+{
+  "Origin_offset": {
+    "enabled": true,
+    "x_offset": 100,
+    "y_offset": 55
+  },
+  "Edge_detection": {
+    "Angle_or_sheet_corner": 90,
+    "Detection": "angle",
+    "Detection_corner": "Fl",
+    "Detection_method": "Capacitive",
+    "Move_to_starting_point_manually": true,
+    "Sheet_dimension_offset_long_edge": 0,
+    "Sheet_loading": "Fl",
+    "enabled": true
+  },
+  "Microjoints": {
+    "enabled": false,
+    "function": "Programmed",
+    "max_x_dimension": 0,
+    "max_y_dimension": 0,
+    "min_x_dimension": 0,
+    "min_y_dimension": 0
+  },
+  "Stops": {
+    "Stop_Select": "Off",
+    "Stop_at": "Off",
+    "Stop_before_part": 25,
+    "enabled": false
+  },
+  "Nozzle_cleaning": {
+    "enabled": false,
+    "value": false
+  },
+  "Programmed_reference": {
+    "Programmed_reference_x": 0,
+    "Programmed_reference_y": 0,
+    "enabled": false
+  },
+  "Vaporisation": {
+    "enabled": false,
+    "function": false
+  },
+  "inverse": {
+    "enabled": false,
+    "value": false
+  },
+  "Sensor_field": {
+    "enabled": false,
+    "value": true
+  }
+}
