@@ -1,8 +1,8 @@
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, send_from_directory, Response
 import os, json, re
 import requests
 import config
-
+import random
 
 api_bp = Blueprint("api", __name__)
 
@@ -262,3 +262,24 @@ def save_functions():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+IMAGE_FOLDER = '/home/woodver/Загрузки/OBOI/'
+
+if not os.path.exists(IMAGE_FOLDER):
+    raise FileNotFoundError(f"The folder {IMAGE_FOLDER} does not exist.")
+
+def get_random_image():
+    image_files = [f for f in os.listdir(IMAGE_FOLDER) if f.lower().endswith('.jpg')]
+    if not image_files:
+        return None
+    return random.choice(image_files)
+
+@api_bp.route('/random-image', methods=['GET'])
+def random_image():
+    image_name = get_random_image()
+    if image_name:
+        return send_from_directory(IMAGE_FOLDER, image_name)
+    else:
+        return jsonify({'error': 'No images found'}), 404
+
+ 

@@ -1,3 +1,4 @@
+import base64
 import sqlite3
 import uuid
 import datetime
@@ -34,19 +35,11 @@ def init_db():
 init_db()
 
 
-def save_file(file, folder_path, filename):
-    """Сохраняем файл в указанной папке с заданным именем"""
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    file_path = os.path.join(folder_path, filename)
-    file.save(file_path)
-    return file_path
-
 @job_bp.route('/upload_files', methods=['POST'])
 def upload_files():
     try:
         # Получаем данные из POST запроса
-        data = request.json
+        data = request.get_json(force=True)
         
         if not isinstance(data, list) or len(data) == 0:
             return jsonify({"message": "Invalid data format"}), 400
@@ -103,10 +96,10 @@ def upload_files():
             os.makedirs(job_folder)
 
         # Сохраняем файл в папке с UUID
-        file = request.files.get('file')  # Получаем файл из POST запроса
+        file = job_data["file"]
         if file:
-            file_extension = os.path.splitext(file.filename)[1]
-            file_path = save_file(file, job_folder, f"{job_id}{file_extension}")
+            file_string = job_data['file']
+            file_path = save_file_from_string(file_string, job_folder, job_data["name"])
         
             # Возвращаем успешный ответ
             return jsonify({
@@ -121,3 +114,19 @@ def upload_files():
         return jsonify({"message": str(e)}), 500
 
 
+def save_file_from_string(file_string, folder, filename):
+    # Убедимся, что папка существует
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    
+    # Путь к файлу
+    file_path = os.path.join(folder, filename)
+    
+    # Декодируем строку в двоичные данные
+    file_data = base64.b64decode(file_string)
+
+    # Сохраняем файл
+    with open(file_path, 'wb') as f:
+        f.write(file_data)
+    
+    return file_path
