@@ -152,7 +152,7 @@ def upload_files():
             c = conn.cursor()
             c.execute("""
                 UPDATE jobs
-                SET loadResult = ?, status = 1, updated_at = ?
+                SET loadResult = ?, status = 0, updated_at = ?
                 WHERE id = ?
             """, (json.dumps(load_result), datetime.datetime.now(), job_id))
             conn.commit()
@@ -283,6 +283,50 @@ def get_jobs():
             "jobs": jobs,
             "limit": limit,
             "offset": offset,
+            "status": "success"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+@job_bp.route('/update_job', methods=['POST'])
+def update_job():
+    try:
+        # Получаем данные из запроса
+        data = request.get_json(force=True)
+
+
+        # Проверка на наличие необходимых параметров
+        if 'param' not in data or 'id' not in data or 'value' not in data:
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        param = data['param']
+        job_id = data['id']
+        value = data['value']
+
+        # Определяем, что параметр доступен для обновления
+        valid_params = ['status', 'dimX', 'dimY', 'material', 'materialLabel', 'name', 'preset', 'quantity', 'loadResult']
+
+        if param not in valid_params:
+            return jsonify({"error": f"Parameter '{param}' is not valid"}), 400
+
+        # Строим SQL-запрос для обновления
+        query = f"UPDATE jobs SET {param} = ? WHERE id = ?"
+        
+        # Выполняем запрос к базе данных
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(query, (value, job_id))
+        conn.commit()
+        conn.close()
+
+        # Проверка, обновилась ли запись
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Job not found or no changes made"}), 404
+
+        return jsonify({
+            "message": f"Job {param} updated successfully",
             "status": "success"
         }), 200
 
