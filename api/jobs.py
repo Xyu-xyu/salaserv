@@ -146,7 +146,7 @@ def upload_files():
             resp.raise_for_status()
 
             # 4. Получаем результат и сохраняем его в базу данных
-            resp = requests.get(EXTERNAL_API + "/py/gcores[1].loadresult", timeout=5)
+            resp = requests.get(EXTERNAL_API + "/py/gcopaths[1].loadresult", timeout=5)
             resp.raise_for_status()
 
             load_result = resp.json()  # Предполагается, что ответ в формате JSON
@@ -425,6 +425,14 @@ def normalizeAngle(a: float) -> float:
         a += 2 * math.pi
     return a
 
+def get_last_two_numbers(s: str):
+    # Находим все числа с точкой или без
+    numbers = re.findall(r'-?\d+(\.\d+)?', s)
+    # Преобразуем строковые числа в числа (float или int)
+    numbers = [float(num) if '.' in num else int(num) for num in numbers]
+    # Возвращаем последние два числа
+    return numbers[-2:]
+
 
 # Функция для генерации SVG
 def generate_svg(paths, width, height):
@@ -461,56 +469,83 @@ def get_listing():
         gcode_parser = make_gcode_parser()
         cmds = [gcode_parser(line) for line in combined_results]
         print("полученные команды:")
-        for cmd in cmds:
-            print(cmd)
+        #for cmd in cmds:
+        #    print(cmd)
 
         # Логика обработки команд и создания путей
         paths = []
         cx, cy = 0, 0
-        height = 100  # Пример высоты, подставьте нужное значение
+        height = 250  # Пример высоты, подставьте нужное значение
+        partOpen = False
+        laserOn =  False
         
         
         for c in cmds:
-            if c['comment'] and 'Part code' in c['comment']:
-                # Добавляем новый путь
+            if c.get('comment') and 'Part code' in c['comment']:
+                print("# print('Part code')")
+                partOpen = True
+                paths[-1]['className'] += " groupStart "
                 continue
-            if c.get('m') == 4:
-                # Лазер вкл
-                paths.append({'path': start(cx, cy, c, height), 'className': 'laserOn'})
-            elif c.get('m') == 5:
-                # Лазер выкл
-                paths.append({'path': start(cx, cy, c, height), 'className': 'laserOff'})
+
+            elif c.get('comment') and 'Part End' in c['comment']:
+                # print('Part End')
+                print("# Part End")
+                partOpen = False
+                paths[-1]['className'] += " groupEnd "
+
+                cx = cx + (c.get('base', {}).get('X', 0))
+                cy = cy + (c.get('base', {}).get('Y', 0))
+
+
+            if isinstance(c.get('m'), (int, float)):
+
+                if c['m'] == 4:
+                    print("# M-4 Лазер включен")
+                    laserOn = True
+                    paths[-1]['className'] += " laserOff "
+                    paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+                    paths[-1]['path'] = start(cx + (c.get('base', {}).get('X', 0)), cy + (c.get('base', {}).get('Y', 0)), c, height)
+
+                elif c['m'] == 5:
+                    print("# M-5 Лазер выключен")
+                    laserOn = False
+                    paths[-1]['className'] += " laserOn "
+                    paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+                    paths[-1]['path'] = start(cx + (c.get('base', {}).get('X', 0)), cy + (c.get('base', {}).get('Y', 0)), c, height)
 
                 # Проверка на G0 или G1
-            elif c.get('g') in [0, 1]:
-                # Получаем X и Y из параметров, если они есть
-                tx = c['params'].get('X', cx)  # Если X не указан, используем cx
-                ty = c['params'].get('Y', cy)  # Если Y не указан, используем cy
-                
-                # Если есть база, учитываем её
-                if 'base' in c and c['base']:
-                    tx += c['base'].get('X', 0)  # Прибавляем к X из базы
-                    ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
-                
-                # Добавляем путь
-                paths.append({'path': line(tx, ty, c, height), 'className': 'line'})
-                
-                # Обновляем текущие координаты
-                cx, cy = tx, ty
-                
-                # Если есть номер строки, обновляем минимальный и максимальный номера
-                if c.get('n'):
-                    n = c['n']
-                    if len(paths) > 0:  # Если пути уже есть
-                        n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
-                        n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
-                        
-                        if n < n0:
-                            paths[-1]['n'][0] = n
-                        if n > n1:
-                            paths[-1]['n'][1] = n
+            if isinstance(c.get('g'), (int, float)):
+
+                if c.get('g') in [0, 1]:
+                    print(" # GET G0 or G1") 
+                    tx = c['params'].get('X', cx)  # Если X не указан, используем cx
+                    ty = c['params'].get('Y', cy)  # Если Y не указан, используем cy
+                    
+                    # Если есть база, учитываем её
+                    if 'base' in c and c['base']:
+                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
+                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
+
+                    add = line(tx, ty, c, height)
+                    paths[-1]['path']+=add
+                    paths[-1]['className']+=' line'
+                    
+                    # Обновляем текущие координаты
+                    cx, cy = tx, ty
+                    
+                    # Если есть номер строки, обновляем минимальный и максимальный номера
+                    if c.get('n'):
+                        n = c['n']
+                        if len(paths) > 0:  # Если пути уже есть
+                            n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
+                            n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
+                            
+                            if n < n0:
+                                paths[-1]['n'][0] = n
+                            if n > n1:
+                                paths[-1]['n'][1] = n
                 elif c.get('g') in [2, 3]:
-                    # Проверка на G2 или G3 (дуги)
+                    print("# Get G2 или G3 (дуги)")
                     tx = c['params'].get('X', cx)  # Новая X-координата
                     ty = c['params'].get('Y', cy)  # Новая Y-координата
                     ci = c['params'].get('I', 0)  # Смещение по X для центра дуги
@@ -543,7 +578,11 @@ def get_listing():
                     sweep = 1 if ccw else 0
 
                     # Добавляем дуговой путь
-                    paths.append({'path': arc_path(tx, ty, r, large, sweep, c, height), 'className': 'arc'})
+                    #paths.append({'path': arc_path(tx, ty, r, large, sweep, c, height), 'className': 'arc'})
+                    
+                    paths[-1]['path']+= arc_path(tx, ty, r, large, sweep, c, height)
+                    paths[-1]['className']+=' arc'
+
 
                     # Обновляем текущие координаты
                     cx, cy = tx, ty
@@ -552,6 +591,9 @@ def get_listing():
                     if c.get('n'):
                         n = c['n']
                         if len(paths) > 0:  # Если пути уже есть
+                            print(paths[-1])
+                            print(paths[-1].get('n'))
+
                             n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
                             n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
 
@@ -559,6 +601,22 @@ def get_listing():
                                 paths[-1]['n'][0] = n
                             if n > n1:
                                 paths[-1]['n'][1] = n
+                elif c.get('g') in [28]:
+                    print("GRT G28")
+                    paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+                elif c.get('g') in [52]:
+                        print("GRT G52")
+                        paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+    
+                        # "Ёбаный костыль": если в res больше одного элемента, используем последний путь из предыдущего элемента
+                        if len(paths) > 1:
+                            # Извлекаем последние два числа из пути предыдущего элемента
+                            x1, y1 = get_last_two_numbers(paths[-2]['path'])
+                            paths[-1]['path'] = f"M{x1} {y1}"
+                        else:
+                            # Если элементов меньше двух, используем текущие координаты
+                            paths[-1]['path'] = f"M{cx} {height - cy}"
+
 
     
 
