@@ -6,7 +6,11 @@ import os, json
 import config
 import requests
 import shutil
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
+from lxml import etree
+import re
+from typing import Dict, Any
+import math
 
 DB_PATH = "jobs.db"
 DB_PATH_PRESET = "preset.db"
@@ -217,7 +221,6 @@ def clear_all():
         return jsonify({"message": f"Error: {str(e)}"}), 500
     
 
-
 @job_bp.route('/get_jobs', methods=['GET'])
 def get_jobs():
     try:
@@ -332,3 +335,257 @@ def update_job():
 
     except Exception as e:
         return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+
+ 
+# Функция для парсинга G-кода
+def make_gcode_parser():
+    last = {'g': None, 'm': None, 'params': {}}
+    base = {'X': 0, 'Y': 0, 'C': 0}  # Начальные значения для базовых координат
+    
+    def parse_gcode_line(raw):
+        nonlocal base  # Делаем base доступной для изменения в этой функции
+        s = raw.strip()
+        out = {'n': None, 'g': None, 'm': None, 'params': {}, 'comment': None, 'base': base.copy()}
+        
+        # Ищем комментарии
+        comment_match = re.search(r"\(([^)]*)\)", s)
+        if comment_match:
+            out['comment'] = comment_match.group(1)
+            s = re.sub(r"\([^)]*\)", "", s)
+        
+        n_match = re.search(r"(\d+)N", s)
+        if n_match:
+            out['n'] = int(n_match.group(1))
+     
+        # Ищем команды G и M
+        g_match = re.search(r"G(-?\d+(?:\.\d+)?)", s)
+        if g_match:
+            out['g'] = float(g_match.group(1))
+        else:    
+            out['g'] = last['g']
+
+        m_match = re.search(r"M(-?\d+(?:\.\d+)?)", s)
+        if m_match:
+            out['m'] = float(m_match.group(1))
+
+        # Параметры X, Y, I, J и т.д.
+        for k in ['X', 'Y', 'I', 'J', 'S', 'P', 'H', 'A', 'L', 'C']:
+            param_match = re.search(rf"{k}(-?\d+(?:\.\d+)?)", s)
+            if param_match:
+                out['params'][k] = float(param_match.group(1))
+            elif k in last['params']:
+                out['params'][k] = last['params'][k]
+        
+        # Если это G52, сохраняем базовые координаты
+        if "G52" in s:
+            base = {**out['params']}
+            out['base'] = base
+        
+        # Обновляем last
+        last['g'] = out['g']
+        last['m'] = out['m']
+        last['params'] = {**last['params'], **out['params']}
+        
+        return out
+    
+    return parse_gcode_line
+
+# Функции для создания путей с учетом поворота
+def rotate_point(x, y, cx, cy, angle_deg):
+    theta = math.radians(angle_deg)
+    dx = x - cx
+    dy = y - cy
+    x_rot = cx + dx * math.cos(theta) - dy * math.sin(theta)
+    y_rot = cy + dx * math.sin(theta) + dy * math.cos(theta)
+    return x_rot, y_rot
+
+def line(x2, y2, c, height):
+    rx2, ry2 = rotate_point(x2, y2, c['base']['X'], c['base']['Y'], c['base']['C'])
+    return f"L{rx2} {height - ry2}"
+
+def start(x1, y1, c, height):
+    rx2, ry2 = rotate_point(x1, y1, c['base']['X'], c['base']['Y'], c['base']['C'])
+    return f"M{rx2} {height - ry2}"
+
+def cross(x, y, size, c, height):
+    rx, ry = rotate_point(x, y, c['base']['X'], c['base']['Y'], c['base']['C'])
+    y_inv = height - ry
+    return f"M{rx - size},{y_inv - size}L{rx + size},{y_inv + size}M{rx - size},{y_inv + size}L{rx + size},{y_inv - size}"
+
+def arc_path(ex, ey, r, large, sweep, c, height):
+    rx_end, ry_end = rotate_point(ex, ey, c['base']['X'], c['base']['Y'], c['base']['C'])
+    return f"A{r},{r} 0,{large},{1 - sweep} {rx_end},{height - ry_end}"
+
+def normalizeAngle(a: float) -> float:
+    while a > math.pi:
+        a -= 2 * math.pi
+    while a < -math.pi:
+        a += 2 * math.pi
+    return a
+
+
+# Функция для генерации SVG
+def generate_svg(paths, width, height):
+    svg = etree.Element("svg", width=str(width), height=str(height), baseProfile="full", xmlns="http://www.w3.org/2000/svg")
+    g = etree.SubElement(svg, "g", class_="svg-pan-zoom_viewport")
+    
+    rect = etree.SubElement(g, "rect", class_="sgn_sheet", x="0", y="0", width=str(width), height=str(height), fill="url(#grid_pattern)")
+    
+    paths_group = etree.SubElement(g, "g", class_="sgn_main_els", style="fill: none; stroke-width: 0.5; stroke: black;")
+    
+    for path_data in paths:
+        path = etree.SubElement(paths_group, "path", d=path_data['path'], class_=path_data['className'])
+    
+    return etree.tostring(svg, pretty_print=True).decode()
+
+
+# Обработчик маршрута для получения G-code
+
+@job_bp.route('/get_listing', methods=['GET'])
+def get_listing():
+    """Прокси для получения G-code listing"""    
+    print('Привет in get_listing')
+    try:
+        # Получаем G-code с внешнего API
+        resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=5)
+        # Парсим полученные строки G-code
+        pattern = re.compile(r'<em>(\d+)</em><span>(.*?)</span>')  # Ищем содержимое между <em> и <span>
+        matches = re.findall(pattern, resp.text)
+        combined_results = [f"{em_value}{span_value}" for em_value, span_value in matches]
+
+        print (combined_results)
+
+
+        gcode_parser = make_gcode_parser()
+        cmds = [gcode_parser(line) for line in combined_results]
+        print("полученные команды:")
+        for cmd in cmds:
+            print(cmd)
+
+        # Логика обработки команд и создания путей
+        paths = []
+        cx, cy = 0, 0
+        height = 100  # Пример высоты, подставьте нужное значение
+        
+        
+        for c in cmds:
+            if c['comment'] and 'Part code' in c['comment']:
+                # Добавляем новый путь
+                continue
+            if c.get('m') == 4:
+                # Лазер вкл
+                paths.append({'path': start(cx, cy, c, height), 'className': 'laserOn'})
+            elif c.get('m') == 5:
+                # Лазер выкл
+                paths.append({'path': start(cx, cy, c, height), 'className': 'laserOff'})
+
+                # Проверка на G0 или G1
+            elif c.get('g') in [0, 1]:
+                # Получаем X и Y из параметров, если они есть
+                tx = c['params'].get('X', cx)  # Если X не указан, используем cx
+                ty = c['params'].get('Y', cy)  # Если Y не указан, используем cy
+                
+                # Если есть база, учитываем её
+                if 'base' in c and c['base']:
+                    tx += c['base'].get('X', 0)  # Прибавляем к X из базы
+                    ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
+                
+                # Добавляем путь
+                paths.append({'path': line(tx, ty, c, height), 'className': 'line'})
+                
+                # Обновляем текущие координаты
+                cx, cy = tx, ty
+                
+                # Если есть номер строки, обновляем минимальный и максимальный номера
+                if c.get('n'):
+                    n = c['n']
+                    if len(paths) > 0:  # Если пути уже есть
+                        n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
+                        n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
+                        
+                        if n < n0:
+                            paths[-1]['n'][0] = n
+                        if n > n1:
+                            paths[-1]['n'][1] = n
+                elif c.get('g') in [2, 3]:
+                    # Проверка на G2 или G3 (дуги)
+                    tx = c['params'].get('X', cx)  # Новая X-координата
+                    ty = c['params'].get('Y', cy)  # Новая Y-координата
+                    ci = c['params'].get('I', 0)  # Смещение по X для центра дуги
+                    cj = c['params'].get('J', 0)  # Смещение по Y для центра дуги
+
+                    # Если есть база, учитываем её
+                    if 'base' in c and c['base']:
+                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
+                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
+
+                    # Рассчитываем радиус дуги
+                    dxs = cx - (cx + ci)  # Смещение по X от центра
+                    dys = cy - (cy + cj)  # Смещение по Y от центра
+                    dxe = tx - (cx + ci)  # Смещение по X для конечной точки
+                    dye = ty - (cy + cj)  # Смещение по Y для конечной точки
+                    r = round((math.hypot(tx - ci, ty - cj)) * 1000) / 1000  # Радиус дуги
+
+                    a1 = math.atan2(dys, dxs)  # Начальный угол
+                    a2 = math.atan2(dye, dxe)  # Конечный угол
+                    d = normalizeAngle(a2 - a1)  # Разница углов
+
+                    ccw = (c.get('g') == 3)  # Направление (по часовой или против)
+                    if ccw and d < 0:
+                        d += 2 * math.pi
+                    elif not ccw and d > 0:
+                        d -= 2 * math.pi
+
+                    # Параметры дуги (стандартно для G2 и G3)
+                    large = 0
+                    sweep = 1 if ccw else 0
+
+                    # Добавляем дуговой путь
+                    paths.append({'path': arc_path(tx, ty, r, large, sweep, c, height), 'className': 'arc'})
+
+                    # Обновляем текущие координаты
+                    cx, cy = tx, ty
+
+                    # Если есть номер строки, обновляем минимальный и максимальный номера
+                    if c.get('n'):
+                        n = c['n']
+                        if len(paths) > 0:  # Если пути уже есть
+                            n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
+                            n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
+
+                            if n < n0:
+                                paths[-1]['n'][0] = n
+                            if n > n1:
+                                paths[-1]['n'][1] = n
+
+    
+
+            
+        
+        # Генерация SVG
+        print("полученные пути:")
+        for path in paths:
+            print(path)
+        
+        svg_data = generate_svg(paths, 200, 200)
+        
+        # Возвращаем SVG как ответ
+        return Response(svg_data, mimetype="image/svg+xml")
+    
+    except requests.Timeout:
+        return Response("Request to external server timed out", status=504, mimetype="text/plain")
+    
+    except requests.RequestException as e:
+        return Response(f"External server error: {str(e)}", status=502, mimetype="text/plain")
+
+
+
+@job_bp.route('/privet', methods=['GET'])
+def privet():
+    print('Привет')
+    return jsonify({
+        "message": "Привет",
+        "status": "success"
+    }), 200

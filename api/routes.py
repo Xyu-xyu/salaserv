@@ -18,7 +18,7 @@ if not os.path.exists(FUNCTIONS_FILE):
 
 
 
-@api_bp.route("/savepreset", methods=["POST"])
+""" @api_bp.route("/savepreset", methods=["POST"])
 def save_preset():
     try:
         # Парсим входящий JSON
@@ -43,7 +43,7 @@ def save_preset():
         return jsonify({"success": True, "file": filepath})
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500 """
 
 
 
