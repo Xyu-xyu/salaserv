@@ -469,8 +469,8 @@ def get_listing():
         gcode_parser = make_gcode_parser()
         cmds = [gcode_parser(line) for line in combined_results]
         print("полученные команды:")
-        #for cmd in cmds:
-        #    print(cmd)
+        for cmd in cmds:
+            print(cmd)
 
         # Логика обработки команд и создания путей
         paths = []
@@ -521,14 +521,9 @@ def get_listing():
                     tx = c['params'].get('X', cx)  # Если X не указан, используем cx
                     ty = c['params'].get('Y', cy)  # Если Y не указан, используем cy
                     
-                    # Если есть база, учитываем её
-                    if 'base' in c and c['base']:
-                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
-                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
-
-                    add = line(tx, ty, c, height)
+                    add = line(tx + c['base'].get('X', 0), ty+ c['base'].get('Y', 0), c, height)
                     paths[-1]['path']+=add
-                    paths[-1]['className']+=' line'
+                    #paths[-1]['className']+=' line'
                     
                     # Обновляем текущие координаты
                     cx, cy = tx, ty
@@ -552,9 +547,6 @@ def get_listing():
                     cj = c['params'].get('J', 0)  # Смещение по Y для центра дуги
 
                     # Если есть база, учитываем её
-                    if 'base' in c and c['base']:
-                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
-                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
 
                     # Рассчитываем радиус дуги
                     dxs = cx - (cx + ci)  # Смещение по X от центра
@@ -579,7 +571,10 @@ def get_listing():
 
                     # Добавляем дуговой путь
                     #paths.append({'path': arc_path(tx, ty, r, large, sweep, c, height), 'className': 'arc'})
-                    
+                    if 'base' in c and c['base']:
+                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
+                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
+
                     paths[-1]['path']+= arc_path(tx, ty, r, large, sweep, c, height)
                     paths[-1]['className']+=' arc'
 
@@ -601,9 +596,26 @@ def get_listing():
                                 paths[-1]['n'][0] = n
                             if n > n1:
                                 paths[-1]['n'][1] = n
-                elif c.get('g') in [28]:
-                    print("GRT G28")
-                    paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+                elif c.get('g') == 4:
+                    # Определяем координаты: если partOpen — с base, иначе — текущие cx, cy
+                    base = c.get('base', {})
+                    if partOpen:
+                        x = cx + base.get('X', 0)
+                        y = cy + base.get('Y', 0)
+                    else:
+                        x = cx
+                        y = cy
+
+                    cross_path = cross(x, y, 2.5, c, height)
+                    cross_obj = {
+                        'path': cross_path,
+                        'n': [c.get('n', 0), c.get('n', 0)],  # n ?? 0 → если n нет, то 0
+                        'className': 'g4'
+                    }
+
+                    paths.insert(0, cross_obj)
+                    
+                    #paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
                 elif c.get('g') in [52]:
                         print("GRT G52")
                         paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
