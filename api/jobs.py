@@ -451,7 +451,7 @@ def get_last_two_numbers(s: str):
 
 
 # Функция для генерации SVG
-def generate_svg(paths, width, height):
+def generate_svg(paths, width, height, cutSeg=None):
     svg = etree.Element("svg", width=str(width), height=str(height), baseProfile="full", xmlns="http://www.w3.org/2000/svg")
     
     # Добавляем элемент defs для паттернов и маркеров
@@ -468,18 +468,21 @@ def generate_svg(paths, width, height):
     # Добавляем стили
     style = etree.SubElement(defs, "style")
     style.text = '''    
-    .sgn_main_els .g4 {
-        stroke: brown;           
+        .sgn_main_els .g4 {
+        stroke: var(--red);           
         stroke-width: 1.5px;         
         fill: none;
+        marker-end: none;
+        marker-mid: none;
+        marker-start: none;
     }
 
     .sgn_main_els path {
         stroke: brown;
         stroke-width: 1px;
-        opacity: 1; 
-        fill: rgb(93, 83, 247);
-      	fill:  rgb(223, 223, 226 );
+        opacity: 0.5; 
+		fill:white;
+
     }
 
     .sgn_main_els path.macros2 {
@@ -489,7 +492,7 @@ def generate_svg(paths, width, height):
     }
 
     .sgn_main_els path.laserOn:first-of-type {
-        fill: red;
+        fill: grey !important;
         stroke-width: 1px;
         opacity: 0.5; 
     }
@@ -497,9 +500,8 @@ def generate_svg(paths, width, height):
     .sgn_main_els .laserOff {
         stroke: var(--violet);
         stroke-width: 1px;
-        fill: blue;
+        fill: none;
         stroke-dasharray: 4 2; 
-        marker-end: url(#arrow); 
     }
     '''
     
@@ -517,10 +519,78 @@ def generate_svg(paths, width, height):
     paths_group = etree.SubElement(g, "g")
     paths_group.set("class", "sgn_main_els")
     
-    for path_data in paths:
-        path = etree.SubElement(paths_group, "path")
-        path.set("d", path_data['path'])
-        path.set("class", path_data['className'])
+    # Логика группировки как в React компоненте
+    grouped_result = []
+    outside_paths = []
+    current_group = []
+    group_index = 1
+    
+    for i, path_data in enumerate(paths):
+        path_d = path_data['path']
+        className = path_data['className']
+        n = path_data.get('n', [0, 0])  # используем [0,0] по умолчанию если n отсутствует
+        
+        # Формируем классы на основе cutSeg
+        cut_class = ""
+        if cutSeg is not None:
+            if n[0] <= cutSeg <= n[1]:
+                cut_class = " currentCut "
+            elif n[0] < cutSeg:
+                cut_class = " cutted "
+            else:
+                cut_class = " uncutted "
+        
+        full_class = className + cut_class
+        
+        # Создаем элемент path
+        path_element = etree.Element("path")
+        path_element.set("d", path_d)
+        path_element.set("class", full_class)
+        
+        # Логика группировки
+        if "groupStart" in className or "g4" in className:
+            # Начинаем новую группу, текущий path идет в outside_paths
+            current_group = []
+            outside_paths.append(path_element)
+            continue
+        
+        if "groupEnd" in className:
+            # Завершаем текущую группу
+            group_index += 1
+            if current_group:
+                # Разворачиваем порядок элементов в группе
+                current_group.reverse()
+                # Создаем элемент группы
+                group_elem = etree.Element("g")
+                # Добавляем все пути в группу
+                for path_in_group in current_group:
+                    group_elem.append(path_in_group)
+                grouped_result.append(group_elem)
+                current_group = None
+            outside_paths.append(path_element)
+            continue
+        
+        # Добавляем путь в текущую группу, если она активна
+        if current_group is not None:
+            current_group.append(path_element)
+        else:
+            outside_paths.append(path_element)
+    
+    # Обрабатываем оставшуюся группу после цикла
+    if current_group:
+        current_group.reverse()
+        group_elem = etree.Element("g")
+        for path_in_group in current_group:
+            group_elem.append(path_in_group)
+        grouped_result.append(group_elem)
+    
+    # Добавляем все элементы в paths_group в правильном порядке
+    # Сначала группы, затем отдельные пути
+    for group_elem in grouped_result:
+        paths_group.append(group_elem)
+    
+    for path_elem in outside_paths:
+        paths_group.append(path_elem)
     
     return etree.tostring(svg, pretty_print=True).decode()
 
@@ -691,8 +761,10 @@ def gen_svg(resp, job_id, width, height):
                         # Если элементов меньше двух, используем текущие координаты
                         paths[-1]['path'] = f"M{cx} {height - cy}"
                 elif c.get("g") in [10]:
-                    macros = ' macros' + str(c['params'].get('S', cx))  + ' '
-                    paths[-1]['className'] += macros
+                    s_value = c['params'].get('S', cx)
+                    macros = f" macros{int(s_value)} "
+                    if paths:
+                        paths[-1]['className'] += macros
 
         svg_data = generate_svg(paths, width, height)
         directory = f'./plans/{job_id}'
