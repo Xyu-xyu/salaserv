@@ -453,17 +453,76 @@ def get_last_two_numbers(s: str):
 # Функция для генерации SVG
 def generate_svg(paths, width, height):
     svg = etree.Element("svg", width=str(width), height=str(height), baseProfile="full", xmlns="http://www.w3.org/2000/svg")
-    g = etree.SubElement(svg, "g", class_="svg-pan-zoom_viewport")
     
-    rect = etree.SubElement(g, "rect", class_="sgn_sheet", x="0", y="0", width=str(width), height=str(height), fill="url(#grid_pattern)")
+    # Добавляем элемент defs для паттернов и маркеров
+    defs = etree.SubElement(svg, "defs")
     
-    paths_group = etree.SubElement(g, "g", class_="sgn_main_els", style="fill: none; stroke-width: 0.5; stroke: black;")
+    # Добавляем grid pattern
+    pattern = etree.SubElement(defs, "pattern", id="grid_pattern", width="10", height="10", patternUnits="userSpaceOnUse")
+    etree.SubElement(pattern, "path", d="M 10 0 L 0 0 0 10", fill="none", stroke="gray", stroke_width="0.5")
+    
+    # Добавляем arrow marker
+    #marker = etree.SubElement(defs, "marker", id="arrow", markerWidth="10", markerHeight="10", refX="0", refY="3", orient="auto", markerUnits="strokeWidth")
+    #etree.SubElement(marker, "path", d="M0,0 L0,6 L9,3 z", fill="var(--violet)")
+    
+    # Добавляем стили
+    style = etree.SubElement(defs, "style")
+    style.text = '''    
+    .sgn_main_els .g4 {
+        stroke: brown;           
+        stroke-width: 1.5px;         
+        fill: none;
+    }
+
+    .sgn_main_els path {
+        stroke: brown;
+        stroke-width: 1px;
+        opacity: 1; 
+        fill: rgb(93, 83, 247);
+      	fill:  rgb(223, 223, 226 );
+    }
+
+    .sgn_main_els path.macros2 {
+        stroke-width: 1px;
+        fill: none;
+        opacity: 1; 
+    }
+
+    .sgn_main_els path.laserOn:first-of-type {
+        fill: red;
+        stroke-width: 1px;
+        opacity: 0.5; 
+    }
+
+    .sgn_main_els .laserOff {
+        stroke: var(--violet);
+        stroke-width: 1px;
+        fill: blue;
+        stroke-dasharray: 4 2; 
+        marker-end: url(#arrow); 
+    }
+    '''
+    
+    g = etree.SubElement(svg, "g")
+    g.set("class", "svg-pan-zoom_viewport")
+    
+    rect = etree.SubElement(g, "rect")
+    rect.set("class", "sgn_sheet")
+    rect.set("x", "0")
+    rect.set("y", "0")
+    rect.set("width", str(width))
+    rect.set("height", str(height))
+    rect.set("fill", "url(#grid_pattern)")
+    
+    paths_group = etree.SubElement(g, "g")
+    paths_group.set("class", "sgn_main_els")
     
     for path_data in paths:
-        path = etree.SubElement(paths_group, "path", d=path_data['path'], class_=path_data['className'])
+        path = etree.SubElement(paths_group, "path")
+        path.set("d", path_data['path'])
+        path.set("class", path_data['className'])
     
     return etree.tostring(svg, pretty_print=True).decode()
-
 
 # Обработчик маршрута для получения G-code
 def gen_svg(resp, job_id, width, height):
@@ -620,17 +679,20 @@ def gen_svg(resp, job_id, width, height):
                     
                     #paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
                 elif c.get('g') in [52]:
-                        #print("GRT G52")
-                        paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
-    
-                        # "Ёбаный костыль": если в res больше одного элемента, используем последний путь из предыдущего элемента
-                        if len(paths) > 1:
-                            # Извлекаем последние два числа из пути предыдущего элемента
-                            x1, y1 = get_last_two_numbers(paths[-2]['path'])
-                            paths[-1]['path'] = f"M{x1} {y1}"
-                        else:
-                            # Если элементов меньше двух, используем текущие координаты
-                            paths[-1]['path'] = f"M{cx} {height - cy}"
+                    #print("GRT G52")
+                    paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
+
+                    # "Ёбаный костыль": если в res больше одного элемента, используем последний путь из предыдущего элемента
+                    if len(paths) > 1:
+                        # Извлекаем последние два числа из пути предыдущего элемента
+                        x1, y1 = get_last_two_numbers(paths[-2]['path'])
+                        paths[-1]['path'] = f"M{x1} {y1}"
+                    else:
+                        # Если элементов меньше двух, используем текущие координаты
+                        paths[-1]['path'] = f"M{cx} {height - cy}"
+                elif c.get("g") in [10]:
+                    macros = ' macros' + str(c['params'].get('S', cx))  + ' '
+                    paths[-1]['className'] += macros
 
         svg_data = generate_svg(paths, width, height)
         directory = f'./plans/{job_id}'
