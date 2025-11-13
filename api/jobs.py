@@ -146,7 +146,7 @@ def upload_files():
             resp.raise_for_status()
 
             # 4. Получаем результат и сохраняем его в базу данных
-            resp = requests.get(EXTERNAL_API + "/py/gcopaths[1].loadresult", timeout=5)
+            resp = requests.get(EXTERNAL_API + "/py/gcores[1].loadresult", timeout=5)
             resp.raise_for_status()
 
             load_result = resp.json()  # Предполагается, что ответ в формате JSON
@@ -161,14 +161,25 @@ def upload_files():
             """, (json.dumps(load_result), datetime.datetime.now(), job_id))
             conn.commit()
             conn.close()
+            resp1 = requests.get(EXTERNAL_API + "/gcore/1/listing", timeout=5)
+            height = job_data["dimY"]#load_result['result']['attr']['dimy']
+            width = job_data["dimX"]#load_result['result']['attr']['dimx']
 
+            svg = gen_svg (resp1, job_id, width, height)
+
+            if svg:
             # Возвращаем успешный ответ
-            return jsonify({
-                "message": "File uploaded and processed successfully",
-                "job_id": job_id,
-                "file_path": file_path,
-                "load_result": load_result
-            }), 200
+                return jsonify({
+                    "message": "File uploaded and processed successfully",
+                    "job_id": job_id,
+                    "file_path": file_path,
+                    "load_result": load_result
+                }), 200
+            else:
+                return jsonify({
+                    "error": "error in saving svg",
+                }), 500
+                
         else:
             return jsonify({"message": "No file uploaded"}), 400
 
@@ -357,7 +368,10 @@ def make_gcode_parser():
         
         n_match = re.search(r"(\d+)N", s)
         if n_match:
-            out['n'] = int(n_match.group(1))
+            try:
+                out['n'] = int(n_match.group(1))
+            except (AttributeError, ValueError):  # Обрабатываем случаи, когда нет group(1) или если это не число
+                out['n'] = last['n'] + 1
      
         # Ищем команды G и M
         g_match = re.search(r"G(-?\d+(?:\.\d+)?)", s)
@@ -451,31 +465,28 @@ def generate_svg(paths, width, height):
 
 # Обработчик маршрута для получения G-code
 
-@job_bp.route('/get_listing', methods=['GET'])
-def get_listing():
-    """Прокси для получения G-code listing"""    
-    print('Привет in get_listing')
+#@job_bp.route('/get_listing', methods=['GET'])
+def gen_svg(resp, job_id, width, height):
     try:
         # Получаем G-code с внешнего API
-        resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=5)
+        #resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=5)
         # Парсим полученные строки G-code
         pattern = re.compile(r'<em>(\d+)</em><span>(.*?)</span>')  # Ищем содержимое между <em> и <span>
         matches = re.findall(pattern, resp.text)
         combined_results = [f"{em_value}{span_value}" for em_value, span_value in matches]
 
-        print (combined_results)
+        #print (combined_results)
 
 
         gcode_parser = make_gcode_parser()
         cmds = [gcode_parser(line) for line in combined_results]
-        print("полученные команды:")
-        for cmd in cmds:
-            print(cmd)
+        #print("полученные команды:")
+        #for cmd in cmds:
+        #    print(cmd)
 
         # Логика обработки команд и создания путей
         paths = []
         cx, cy = 0, 0
-        height = 250  # Пример высоты, подставьте нужное значение
         partOpen = False
         laserOn =  False
         
@@ -629,26 +640,31 @@ def get_listing():
                             # Если элементов меньше двух, используем текущие координаты
                             paths[-1]['path'] = f"M{cx} {height - cy}"
 
-
+        svg_data = generate_svg(paths, width, height)
+        directory = f'./plans/{job_id}'
     
+        # Создаем директорию, если она не существует
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        # Путь к файлу
+        file_path = os.path.join(directory, 'img.svg')
+        
+        # Сохраняем SVG-данные в файл
+        with open(file_path, 'w') as file:
+            file.write(svg_data)
 
-            
-        
-        # Генерация SVG
-        print("полученные пути:")
-        for path in paths:
-            print(path)
-        
-        svg_data = generate_svg(paths, 200, 200)
+        return True
         
         # Возвращаем SVG как ответ
-        return Response(svg_data, mimetype="image/svg+xml")
+
+        
     
     except requests.Timeout:
-        return Response("Request to external server timed out", status=504, mimetype="text/plain")
+        return False
     
     except requests.RequestException as e:
-        return Response(f"External server error: {str(e)}", status=502, mimetype="text/plain")
+        return False
 
 
 

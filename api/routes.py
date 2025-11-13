@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_from_directory, Response
+from flask import Blueprint, request, jsonify, send_from_directory, abort, Response
 import os, json, re
 import requests
 import config
@@ -282,4 +282,18 @@ def random_image():
     else:
         return jsonify({'error': 'No images found'}), 404
 
- 
+PLANS_DIR = './plans'
+
+@api_bp.route('/get_svg/<job_id>', methods=['GET'])
+def get_svg(job_id):
+    # Формируем путь к файлу img.svg для указанного job_id
+    folder_path = os.path.join(PLANS_DIR, job_id)
+    svg_file = 'img.svg'
+    
+    # Проверяем, существует ли папка и файл
+    if os.path.exists(os.path.join(folder_path, svg_file)):
+        # Отправляем файл, если он существует
+        return send_from_directory(folder_path, svg_file)
+    else:
+        # Возвращаем ошибку 404, если файл не найден
+        abort(404, description="SVG file not found for job_id: {}".format(job_id))
