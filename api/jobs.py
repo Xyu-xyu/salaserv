@@ -368,6 +368,7 @@ def make_gcode_parser():
         
         n_match = re.search(r"(\d+)N", s)
         if n_match:
+            print("if n_match:")
             try:
                 out['n'] = int(n_match.group(1))
             except (AttributeError, ValueError):  # Обрабатываем случаи, когда нет group(1) или если это не число
@@ -439,11 +440,12 @@ def normalizeAngle(a: float) -> float:
         a += 2 * math.pi
     return a
 
+import re
+
 def get_last_two_numbers(s: str):
-    # Находим все числа с точкой или без
-    numbers = re.findall(r'-?\d+(\.\d+)?', s)
-    # Преобразуем строковые числа в числа (float или int)
-    numbers = [float(num) if '.' in num else int(num) for num in numbers]
+    numbers = re.findall(r'-?\d+\.?\d*', s)  # Измененное регулярное выражение
+    # Преобразуем строковые числа в числа (float)
+    numbers = [float(num) for num in numbers]
     # Возвращаем последние два числа
     return numbers[-2:]
 
@@ -464,12 +466,9 @@ def generate_svg(paths, width, height):
 
 
 # Обработчик маршрута для получения G-code
-
-#@job_bp.route('/get_listing', methods=['GET'])
 def gen_svg(resp, job_id, width, height):
     try:
         # Получаем G-code с внешнего API
-        #resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=5)
         # Парсим полученные строки G-code
         pattern = re.compile(r'<em>(\d+)</em><span>(.*?)</span>')  # Ищем содержимое между <em> и <span>
         matches = re.findall(pattern, resp.text)
@@ -493,14 +492,13 @@ def gen_svg(resp, job_id, width, height):
         
         for c in cmds:
             if c.get('comment') and 'Part code' in c['comment']:
-                print("# print('Part code')")
+                #print("# print('Part code')")
                 partOpen = True
                 paths[-1]['className'] += " groupStart "
                 continue
 
             elif c.get('comment') and 'Part End' in c['comment']:
-                # print('Part End')
-                print("# Part End")
+                #print("# Part End")
                 partOpen = False
                 paths[-1]['className'] += " groupEnd "
 
@@ -511,14 +509,14 @@ def gen_svg(resp, job_id, width, height):
             if isinstance(c.get('m'), (int, float)):
 
                 if c['m'] == 4:
-                    print("# M-4 Лазер включен")
+                    #print("# M-4 Лазер включен")
                     laserOn = True
                     paths[-1]['className'] += " laserOff "
                     paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
                     paths[-1]['path'] = start(cx + (c.get('base', {}).get('X', 0)), cy + (c.get('base', {}).get('Y', 0)), c, height)
 
                 elif c['m'] == 5:
-                    print("# M-5 Лазер выключен")
+                    #print("# M-5 Лазер выключен")
                     laserOn = False
                     paths[-1]['className'] += " laserOn "
                     paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
@@ -528,13 +526,13 @@ def gen_svg(resp, job_id, width, height):
             if isinstance(c.get('g'), (int, float)):
 
                 if c.get('g') in [0, 1]:
-                    print(" # GET G0 or G1") 
+                    #print(" # GET G0 or G1") 
                     tx = c['params'].get('X', cx)  # Если X не указан, используем cx
                     ty = c['params'].get('Y', cy)  # Если Y не указан, используем cy
                     
                     add = line(tx + c['base'].get('X', 0), ty+ c['base'].get('Y', 0), c, height)
                     paths[-1]['path']+=add
-                    #paths[-1]['className']+=' line'
+                    paths[-1]['className']+=' line'
                     
                     # Обновляем текущие координаты
                     cx, cy = tx, ty
@@ -544,8 +542,7 @@ def gen_svg(resp, job_id, width, height):
                         n = c['n']
                         if len(paths) > 0:  # Если пути уже есть
                             n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
-                            n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
-                            
+                            n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути                            
                             if n < n0:
                                 paths[-1]['n'][0] = n
                             if n > n1:
@@ -581,12 +578,7 @@ def gen_svg(resp, job_id, width, height):
                     sweep = 1 if ccw else 0
 
                     # Добавляем дуговой путь
-                    #paths.append({'path': arc_path(tx, ty, r, large, sweep, c, height), 'className': 'arc'})
-                    if 'base' in c and c['base']:
-                        tx += c['base'].get('X', 0)  # Прибавляем к X из базы
-                        ty += c['base'].get('Y', 0)  # Прибавляем к Y из базы
-
-                    paths[-1]['path']+= arc_path(tx, ty, r, large, sweep, c, height)
+                    paths[-1]['path']+= arc_path(tx + c['base'].get('X', 0), ty + c['base'].get('Y', 0), r, large, sweep, c, height)
                     paths[-1]['className']+=' arc'
 
 
@@ -628,7 +620,7 @@ def gen_svg(resp, job_id, width, height):
                     
                     #paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
                 elif c.get('g') in [52]:
-                        print("GRT G52")
+                        #print("GRT G52")
                         paths.append({'path': '', 'n': [float('inf'), -float('inf')], 'className': ''})
     
                         # "Ёбаный костыль": если в res больше одного элемента, используем последний путь из предыдущего элемента
@@ -655,9 +647,6 @@ def gen_svg(resp, job_id, width, height):
             file.write(svg_data)
 
         return True
-        
-        # Возвращаем SVG как ответ
-
         
     
     except requests.Timeout:
