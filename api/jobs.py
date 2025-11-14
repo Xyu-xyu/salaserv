@@ -205,7 +205,7 @@ def save_file_from_string(file_string, folder, filename):
     return file_path
 
 
-@job_bp.route('/clear_all', methods=['POST'])
+@job_bp.route('/clear_all', methods=['POST', 'GET'])
 def clear_all():
     try:
         # 1. Очистка базы данных
@@ -231,6 +231,42 @@ def clear_all():
     except Exception as e:
         return jsonify({"message": f"Error: {str(e)}"}), 500
     
+
+@job_bp.route('/delete_job', methods=['POST'])
+def delete_job():
+    try:
+        # Получаем данные из запроса
+        data = request.get_json(force=True)
+
+        # Проверяем обязательный параметр
+        if 'id' not in data:
+            return jsonify({"error": "Missing required parameter: id"}), 400
+
+        job_id = data['id']
+
+        # Удаляем запись
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        query = "DELETE FROM jobs WHERE id = ?"
+        cursor.execute(query, (job_id,))
+        conn.commit()
+
+        rows_affected = cursor.rowcount
+        conn.close()
+
+        # Проверяем, была ли запись удалена
+        if rows_affected == 0:
+            return jsonify({"error": "Job not found"}), 404
+
+        return jsonify({
+            "message": f"Job with id={job_id} deleted successfully",
+            "status": "success"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @job_bp.route('/get_jobs', methods=['GET'])
 def get_jobs():
