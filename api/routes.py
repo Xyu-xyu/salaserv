@@ -263,7 +263,7 @@ def save_functions():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-IMAGE_FOLDER = '/home/woodver/Загрузки/OBOI/'
+""" IMAGE_FOLDER = '/home/woodver/Загрузки/OBOI/'
 
 if not os.path.exists(IMAGE_FOLDER):
     raise FileNotFoundError(f"The folder {IMAGE_FOLDER} does not exist.")
@@ -282,7 +282,7 @@ def random_image():
     else:
         return jsonify({'error': 'No images found'}), 404
 
-PLANS_DIR = './plans'
+PLANS_DIR = './plans' """
 
 @api_bp.route('/get_svg/<job_id>', methods=['GET'])
 def get_svg(job_id):
