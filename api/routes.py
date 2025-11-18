@@ -17,36 +17,6 @@ if not os.path.exists(FUNCTIONS_FILE):
         json.dump([], f, ensure_ascii=False, indent=2)
 
 
-
-""" @api_bp.route("/savepreset", methods=["POST"])
-def save_preset():
-    try:
-        # Парсим входящий JSON
-        data = request.get_json(force=True)
-
-        # Проверка структуры
-        material = data.get("material", {})
-        code = material.get("name")
-        thickness = material.get("thickness")
-
-        if not code or thickness is None:
-            return jsonify({"error": "Неверный JSON, нужны material.code и material.thickness"}), 400
-
-        # Формируем имя файла
-        filename = f"{code}_{thickness}.json"
-        filepath = os.path.join(SAVE_DIR, filename)
-
-        # Сохраняем в файл
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-        return jsonify({"success": True, "file": filepath})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500 """
-
-
-
 @api_bp.route("/loadresult", methods=["GET"])
 def get_load_result():
     """Прокси для получения loadresult"""
@@ -280,9 +250,9 @@ def random_image():
     if image_name:
         return send_from_directory(IMAGE_FOLDER, image_name)
     else:
-        return jsonify({'error': 'No images found'}), 404
+        return jsonify({'error': 'No images found'}), 404"""
 
-PLANS_DIR = './plans' """
+PLANS_DIR = './plans'
 
 @api_bp.route('/get_svg/<job_id>', methods=['GET'])
 def get_svg(job_id):

@@ -10,15 +10,15 @@ from flask import Blueprint, request, jsonify, Response
 from lxml import etree
 import re
 from typing import Dict, Any
-import math
+import math, re
 
-DB_PATH = "jobs.db"
+DB_PATH = "jobs1.db"
 DB_PATH_PRESET = "preset.db"
 job_bp = Blueprint("jdb", __name__)
 EXTERNAL_API = config.EXTERNAL_API
 
 
-def init_db():
+def create_table():
     """Создаем базу данных и таблицу, если ее нет"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -35,14 +35,60 @@ def init_db():
             created_at DATETIME,
             updated_at DATETIME,
             loadResult TEXT,
-            status INTEGER DEFAULT 0
+            status INTEGER DEFAULT 0,
+            array_id INTEGER DEFAULT 0,
+            is_cutting INTEGER DEFAULT 0
         )
     """)
     conn.commit()
     conn.close()
 
+
+def init_db():
+    # Выполняем миграцию при каждом запуске
+    create_table()  # Создание таблицы, если её нет
+ 
 # Инициализация базы данных
 init_db()
+
+""" def show_all():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT array_id FROM jobs LIMIT 10")
+    rows = cursor.fetchall()
+    for row in rows:
+        print(row)
+
+show_all() """
+
+
+def get_last_in_status(status: int):
+    try:
+        # Открываем соединение с базой данных
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Выполняем запрос для нахождения максимального значения array_id для указанного status
+        cursor.execute("""
+            SELECT COALESCE(MAX(array_id), -1) FROM jobs WHERE status = ?
+        """, (status,))
+
+        # Получаем максимальное значение array_id
+        max_array_id = cursor.fetchone()[0]
+
+        # Если max_array_id == None, то установим значение в -1 (на случай отсутствия записей)
+        if max_array_id is None:
+            max_array_id = -1
+        
+        # Возвращаем максимальное значение array_id + 1
+        return max_array_id + 1
+    
+    except sqlite3.Error as e:
+        print(f"Ошибка при работе с базой данных: {e}")
+        return -1
+    finally:
+        # Закрываем соединение с базой данных
+        conn.close()
 
 
 @job_bp.route('/upload_files', methods=['POST'])
@@ -75,7 +121,9 @@ def upload_files():
             "created_at": now,
             "updated_at": now,
             "loadResult": "",  # Пустой JSON объект для loadResult
-            "status": 0  # Статус по умолчанию "0" (загружен)
+            "status": 0,  # Статус по умолчанию "0" (загружен)
+            "is_cutting":0,
+            "array_id": get_last_in_status(0)
         }
 
         # Сохраняем данные в базу данных
@@ -84,14 +132,14 @@ def upload_files():
 
         cursor.execute("""
             INSERT INTO jobs (
-                id, dimX, dimY, material, materialLabel, name, preset, quantity,
-                created_at, updated_at, loadResult, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, dimX, dimY, material, materialLabel, name, preset, quantity, created_at, updated_at, loadResult, status, is_cutting, array_id 
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             job_record["id"], job_record["dimX"], job_record["dimY"], job_record["material"],
             job_record["materialLabel"], job_record["name"], job_record["preset"],
             job_record["quantity"], job_record["created_at"], job_record["updated_at"],
-            job_record["loadResult"], job_record["status"]
+            job_record["loadResult"], job_record["status"], 
+            job_record["is_cutting"], job_record["array_id"]
         ))
 
         conn.commit()
@@ -280,7 +328,7 @@ def get_jobs():
         material = request.args.get('material')  # Фильтр по материалу
 
         # Строим базовый запрос
-        query = "SELECT id, dimX, dimY, material, materialLabel, name, preset, quantity, created_at, updated_at, loadResult, status FROM jobs WHERE 1=1"
+        query = "SELECT id, dimX, dimY, material, materialLabel, name, preset, quantity, created_at, updated_at, loadResult, status, is_cutting, array_id FROM jobs WHERE 1=1"
         params = []
 
         # Добавляем фильтры
@@ -301,6 +349,7 @@ def get_jobs():
             params.append(f"%{material}%")
 
         # Добавляем пагинацию
+        query += " ORDER BY array_id ASC"
         query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
@@ -327,6 +376,8 @@ def get_jobs():
                 "updated_at": row[9],
                 "loadResult": row[10],
                 "status": row[11],
+                "is_cutting": row[12],
+                "array_id": row[13],
             })
 
         return jsonify({
@@ -356,7 +407,7 @@ def update_job():
         value = data['value']
 
         # Определяем, что параметр доступен для обновления
-        valid_params = ['status', 'dimX', 'dimY', 'material', 'materialLabel', 'name', 'preset', 'quantity', 'loadResult']
+        valid_params = ['status', 'dimX', 'dimY', 'material', 'materialLabel', 'name', 'preset', 'quantity', 'loadResult', 'array_id', 'is_cutting']
 
         if param not in valid_params:
             return jsonify({"error": f"Parameter '{param}' is not valid"}), 400
@@ -385,7 +436,42 @@ def update_job():
 
 
 
+@job_bp.route('/update_job_list', methods=['POST'])
+def update_job_list():
+    # Получаем данные от клиента
+    data = request.get_json(force=True)    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    # Создаем соединение с базой данных
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    for updated_job in data:
+        job_id = updated_job.get("id")
+        array_id = updated_job.get("array_id")
+        status = updated_job.get("status")
+        
+        # Проверяем, существует ли запись с данным id в базе данных
+        cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        job = cursor.fetchone()
+
+        if job:
+            # Обновляем запись в базе данных
+            if array_id is not None:
+                cursor.execute("UPDATE jobs SET array_id = ? WHERE id = ?", (array_id, job_id))
+            if status is not None:
+                cursor.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
+            conn.commit()
+        else:
+            # Если запись не найдена, возвращаем ошибку
+            conn.close()  # Закрываем соединение
+            return jsonify({"error": f"Job with id {job_id} not found"}), 404
+
+    conn.close()  # Закрываем соединение
+    return jsonify({"message": "Job list updated successfully"}), 200
  
+
 # Функция для парсинга G-кода
 def make_gcode_parser():
     last = {'g': None, 'm': None, 'params': {}}
@@ -476,15 +562,12 @@ def normalizeAngle(a: float) -> float:
         a += 2 * math.pi
     return a
 
-import re
-
 def get_last_two_numbers(s: str):
     numbers = re.findall(r'-?\d+\.?\d*', s)  # Измененное регулярное выражение
     # Преобразуем строковые числа в числа (float)
     numbers = [float(num) for num in numbers]
     # Возвращаем последние два числа
     return numbers[-2:]
-
 
 # Функция для генерации SVG
 def generate_svg(paths, width, height, cutSeg=None):
@@ -713,7 +796,7 @@ def gen_svg(resp, job_id, width, height):
                             if n > n1:
                                 paths[-1]['n'][1] = n
                 elif c.get('g') in [2, 3]:
-                    print("# Get G2 или G3 (дуги)")
+                    #print("# Get G2 или G3 (дуги)")
                     tx = c['params'].get('X', cx)  # Новая X-координата
                     ty = c['params'].get('Y', cy)  # Новая Y-координата
                     ci = c['params'].get('I', 0)  # Смещение по X для центра дуги
@@ -754,8 +837,8 @@ def gen_svg(resp, job_id, width, height):
                     if c.get('n'):
                         n = c['n']
                         if len(paths) > 0:  # Если пути уже есть
-                            print(paths[-1])
-                            print(paths[-1].get('n'))
+                            #print(paths[-1])
+                            #print(paths[-1].get('n'))
 
                             n0 = paths[-1].get('n', [float('inf')])[0]  # Минимальный номер из последнего пути
                             n1 = paths[-1].get('n', [-float('inf')])[1]  # Максимальный номер из последнего пути
