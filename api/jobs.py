@@ -469,7 +469,7 @@ def update_job_list():
             return jsonify({"error": f"Job with id {job_id} not found"}), 404
 
     conn.close()  # Закрываем соединение
-    return jsonify({"message": "Job list updated successfully"}), 200
+    return jsonify({"message": "Job list updated successfully", "status": "success"}), 200
  
 
 # Функция для парсинга G-кода

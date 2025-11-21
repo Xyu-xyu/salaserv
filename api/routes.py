@@ -56,6 +56,7 @@ def upload_gcode(core: int):
     Получает тело запроса (строку или бинарные данные) и отправляет на внешний сервер
     """
     try:
+
         content = request.get_data()  # raw body, без парсинга
         if not content:
             return jsonify({"error": "Empty body"}), 400
@@ -233,25 +234,7 @@ def save_functions():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-""" IMAGE_FOLDER = '/home/woodver/Загрузки/OBOI/'
-
-if not os.path.exists(IMAGE_FOLDER):
-    raise FileNotFoundError(f"The folder {IMAGE_FOLDER} does not exist.")
-
-def get_random_image():
-    image_files = [f for f in os.listdir(IMAGE_FOLDER) if f.lower().endswith('.jpg')]
-    if not image_files:
-        return None
-    return random.choice(image_files)
-
-@api_bp.route('/random-image', methods=['GET'])
-def random_image():
-    image_name = get_random_image()
-    if image_name:
-        return send_from_directory(IMAGE_FOLDER, image_name)
-    else:
-        return jsonify({'error': 'No images found'}), 404"""
-
+ 
 PLANS_DIR = './plans'
 
 @api_bp.route('/get_svg/<job_id>', methods=['GET'])
@@ -267,3 +250,70 @@ def get_svg(job_id):
     else:
         # Возвращаем ошибку 404, если файл не найден
         abort(404, description="SVG file not found for job_id: {}".format(job_id))
+
+
+@api_bp.route("/gcore/<int:core>/upload_from_id", methods=["POST"])
+def upload_gcode_from_id(core: int):
+    """
+    Загружает на станок файл *.ncp из папки plans/<id>/
+    Ожидает в теле запроса JSON: {"id": "some_folder_name"}
+    """
+    try:
+        # 1. Получаем id из JSON
+        payload = request.get_json(force=True)
+        if 'id' not in payload:
+            return jsonify({"error": "Missing required parameter: id"}), 400
+
+        plan_id = payload.get("id")
+
+        if not plan_id:
+            return jsonify({"error": "Field 'id' is required in JSON body"}), 400
+
+        # 2. Формируем путь к папке
+        plans_folder = os.path.join('./plans', str(plan_id).strip())
+        if not os.path.isdir(plans_folder):
+            return jsonify({"error": f"Folder not found: {plans_folder}"}), 404
+
+        # 3. Ищем первый файл с расширением .ncp
+        ncp_files = [f for f in os.listdir(plans_folder) if f.lower().endswith('.ncp')]
+        
+        if not ncp_files:
+            return jsonify({"error": f"No .ncp file found in {plans_folder}"}), 404
+        
+        if len(ncp_files) > 1:
+            # Можно либо взять первый, либо вернуть ошибку — я беру первый (как обычно делают)
+            # return jsonify({"error": f"Multiple .ncp files found, expected one"}), 400
+            pass  # просто берём первый
+
+        file_name = ncp_files[0]
+        file_path = os.path.join(plans_folder, file_name)
+
+        # 4. Читаем файл как бинарник
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+
+        if not file_content:
+            return jsonify({"error": "Selected .ncp file is empty"}), 400
+
+        # 5. Отправляем на внешний сервер (точно как в /upload)
+        url = f"{EXTERNAL_API}/gcore/{core}/upload"
+        headers = {"Content-Type": "application/octet-stream"}
+        
+        resp = requests.post(url, data=file_content, headers=headers, timeout=30)
+        resp.raise_for_status()
+
+        # 6. Успешный ответ
+        return jsonify({
+            "status": "ok",
+            "uploaded_file": file_name,
+            "file_size": len(file_content),
+            "external_status": resp.status_code
+        })
+
+    except requests.RequestException as e:
+        return jsonify({"error": f"External server error: {str(e)}"}), 502
+    except FileNotFoundError:
+        return jsonify({"error": f"File not found: {file_path}"}), 404
+    except Exception as e:
+        # Ловим всё остальное (ошибки прав доступа, JSON и т.д.)
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
