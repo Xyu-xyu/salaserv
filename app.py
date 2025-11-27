@@ -40,30 +40,40 @@ background_task_started = False
 def generate_machine_data():
     """Фоновый таск, отправляет данные каждые 1 сек"""
     while True:
+        exec_line = None  # ← будем брать из статистики, если получится
+
         try:
-            # Пробуем получить данные с внешнего сервера
+            # Сначала пытаемся взять статистику — там есть exec_line
+            resp_stat = requests.get(f"{EXTERNAL_API}/servo/statistic", timeout=1)
+            resp_stat.raise_for_status()
+            stat_data = resp_stat.json()
+            exec_line = stat_data.get("ycoe", {}).get("exec_line", 0)
+
+            # Теперь динамика (позиции осей)
             resp = requests.get(f"{EXTERNAL_API}/servo/dynamic", timeout=1)
             resp.raise_for_status()
             servo_data = resp.json()
 
-            # Берём элементы 1,2,3 (X,Y,Z) и их position
             data = [
                 {"name": "X", "measure": "mm", "val": round(servo_data[1]["position"], 2)},
                 {"name": "Y", "measure": "mm", "val": round(servo_data[2]["position"], 2)},
                 {"name": "Z", "measure": "mm", "val": round(servo_data[3]["position"], 2)},
+                {"name": "exec_line", "measure": "num", "val": exec_line},
             ]
 
-        except (requests.RequestException, IndexError, KeyError):
-            # Если не удалось получить данные, отправляем рандомные
+        except (requests.RequestException, IndexError, KeyError, AttributeError):
+            # Если хоть один запрос упал — делаем заглушку
             data = [
                 {"name": "X", "measure": "mm", "val": round(random.uniform(0, 300), 2)},
                 {"name": "Y", "measure": "mm", "val": round(random.uniform(0, 1500), 2)},
                 {"name": "Z", "measure": "mm", "val": round(random.uniform(0, 30), 2)},
+                {"name": "exec_line", "measure": "num", "val": 0}
+                ##{"name": "exec_line", "measure": "num", "val": round(random.uniform(0, 1000))}
             ]
 
-        # Отправляем всем подключённым клиентам через SocketIO
+        # Отправляем клиентам
         socketio.emit("machine_data", data)
-        socketio.sleep(1)  # корректно с eventlet
+        socketio.sleep(1)
 
 
 @socketio.on("connect")
