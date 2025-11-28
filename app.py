@@ -53,12 +53,47 @@ def generate_machine_data():
             resp = requests.get(f"{EXTERNAL_API}/servo/dynamic", timeout=1)
             resp.raise_for_status()
             servo_data = resp.json()
+            servo_X = servo_data[1]
+            servo_Y = servo_data[2]
+            servo_Z = servo_data[3]
+
+            # Функция-хелпер: проверяет, активен ли концевик (нажат ли он сейчас)
+            def is_limit_active(current_pos, limit_value):
+                if limit_value is False:        # концевик не настроен
+                    return False
+                if not isinstance(limit_value, (int, float)):  # на всякий случай
+                    return False
+                return current_pos >= limit_value if 'plus' in locals() or 'NOT' in str(limit_value) else current_pos <= limit_value
+                # Но лучше явно: NOT — это +лимит, POT — это -лимит
+
+            # Более читаемый и надёжный вариант:
+            def limit_plus_active(pos, not_val):
+                return int(isinstance(not_val, (int, float)) and pos >= not_val)
+
+            def limit_minus_active(pos, pot_val):
+                return int(isinstance(pot_val, (int, float)) and pos <= pot_val)
+
+            # Состояния концевиков (True — нажат/достигнут, False — не достигнут или не настроен)
+            limitXplus  = limit_plus_active(servo_X["position"],  servo_X["inputs"]["NOT"])
+            limitXminus = limit_minus_active(servo_X["position"], servo_X["inputs"]["POT"])
+
+            limitYplus  = limit_plus_active(servo_Y["position"],  servo_Y["inputs"]["NOT"])
+            limitYminus = limit_minus_active(servo_Y["position"], servo_Y["inputs"]["POT"])
+
+            limitZplus  = limit_plus_active(servo_Z["position"],  servo_Z["inputs"]["NOT"])
+            limitZminus = limit_minus_active(servo_Z["position"], servo_Z["inputs"]["POT"])
 
             data = [
-                {"name": "X", "measure": "mm", "val": round(servo_data[1]["position"], 2)},
-                {"name": "Y", "measure": "mm", "val": round(servo_data[2]["position"], 2)},
-                {"name": "Z", "measure": "mm", "val": round(servo_data[3]["position"], 2)},
-                {"name": "exec_line", "measure": "num", "val": exec_line},
+                {"name": "X",           "measure": "mm",      "val": round(servo_X["position"], 2)},
+                {"name": "Y",           "measure": "mm",      "val": round(servo_Y["position"], 2)},
+                {"name": "Z",           "measure": "mm",      "val": round(servo_Z["position"], 2)},
+                {"name": "limitXplus",  "measure": "boolean", "val": limitXplus},
+                {"name": "limitXminus", "measure": "boolean", "val": limitXminus},
+                {"name": "limitYplus",  "measure": "boolean", "val": limitYplus},
+                {"name": "limitYminus", "measure": "boolean", "val": limitYminus},
+                {"name": "limitZplus",  "measure": "boolean", "val": limitZplus},
+                {"name": "limitZminus", "measure": "boolean", "val": limitZminus},
+                {"name": "exec_line",   "measure": "num",     "val": int(exec_line) if exec_line else 0},
             ]
 
         except (requests.RequestException, IndexError, KeyError, AttributeError):
@@ -67,7 +102,13 @@ def generate_machine_data():
                 {"name": "X", "measure": "mm", "val": round(random.uniform(0, 300), 2)},
                 {"name": "Y", "measure": "mm", "val": round(random.uniform(0, 1500), 2)},
                 {"name": "Z", "measure": "mm", "val": round(random.uniform(0, 30), 2)},
-                {"name": "exec_line", "measure": "num", "val": 0}
+                {"name": "exec_line", "measure": "num", "val": 0},
+                {"name": "limitXplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "limitXminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "limitYplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "limitYminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "limitZplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "limitZminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
                 ##{"name": "exec_line", "measure": "num", "val": round(random.uniform(0, 1000))}
             ]
 
