@@ -94,21 +94,27 @@ def generate_machine_data():
                 {"name": "limitZplus",  "measure": "boolean", "val": limitZplus},
                 {"name": "limitZminus", "measure": "boolean", "val": limitZminus},
                 {"name": "exec_line",   "measure": "num",     "val": int(exec_line) if exec_line else 0},
+                {"name": "N2",          "measure": "bar",     "val": round(random.uniform(0, 1))},
+                {"name": "Nd",          "measure": "mm",      "val": round(random.uniform(0, 1))},
+                {"name": "f",           "measure": "kHz",     "val": round(random.uniform(0, 1))},
             ]
 
         except (requests.RequestException, IndexError, KeyError, AttributeError):
             # Если хоть один запрос упал — делаем заглушку
             data = [
-                {"name": "X", "measure": "mm", "val": round(random.uniform(0, 300), 2)},
-                {"name": "Y", "measure": "mm", "val": round(random.uniform(0, 1500), 2)},
-                {"name": "Z", "measure": "mm", "val": round(random.uniform(0, 30), 2)},
-                {"name": "exec_line", "measure": "num", "val": 0},
+                {"name": "X",           "measure": "mm",     "val": round(random.uniform(0, 300), 2)},
+                {"name": "Y",           "measure": "mm",      "val": round(random.uniform(0, 1500), 2)},
+                {"name": "Z",           "measure": "mm",      "val": round(random.uniform(0, 30), 2)},
+                {"name": "exec_line",   "measure": "num",     "val": 0},
                 {"name": "limitXplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
                 {"name": "limitXminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
                 {"name": "limitYplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
                 {"name": "limitYminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
                 {"name": "limitZplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
                 {"name": "limitZminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
+                {"name": "N2",          "measure": "bar",     "val": round(random.uniform(0, 1))},
+                {"name": "Nd",          "measure": "mm",      "val": round(random.uniform(0, 1))},
+                {"name": "f",           "measure": "kHz",     "val": round(random.uniform(0, 1))},
                 ##{"name": "exec_line", "measure": "num", "val": round(random.uniform(0, 1000))}
             ]
 
