@@ -1,5 +1,6 @@
 import base64
 import sqlite3
+import time
 import uuid
 import datetime
 import os, json
@@ -194,10 +195,11 @@ def upload_files():
             resp.raise_for_status()
 
             # 4. Получаем результат и сохраняем его в базу данных
-            resp = requests.get(EXTERNAL_API + "/py/gcores[1].loadresult", timeout=5)
+            resp = requests.get(EXTERNAL_API + "/gcore/1/result", timeout=5)
             resp.raise_for_status()
-
             load_result = resp.json()  # Предполагается, что ответ в формате JSON
+            #print("load_result ???")
+            #print(load_result)
 
             # Обновляем запись в базе данных с результатом загрузки
             conn = sqlite3.connect(DB_PATH)
@@ -209,12 +211,15 @@ def upload_files():
             """, (json.dumps(load_result), datetime.datetime.now(), job_id))
             conn.commit()
             conn.close()
-            resp1 = requests.get(EXTERNAL_API + "/gcore/1/listing", timeout=5)
-            height = job_data["dimY"]#load_result['result']['attr']['dimy']
-            width = job_data["dimX"]#load_result['result']['attr']['dimx']
 
-            svg = gen_svg (resp1, job_id, width, height)
-
+            height = job_data["dimY"]
+            width = job_data["dimX"]
+            time.sleep(5)  
+            url = EXTERNAL_API + "/gcore/1/listing.json"
+            r = requests.get(url, timeout=(2, 60), headers={"Connection": "close"})
+            if r.status_code == 200:
+                data = r.json()       
+                svg = gen_svg(data, job_id, width, height)
             if svg:
             # Возвращаем успешный ответ
                 return jsonify({
@@ -233,6 +238,7 @@ def upload_files():
 
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+    
 
 
 def save_file_from_string(file_string, folder, filename):
@@ -435,7 +441,6 @@ def update_job():
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
 
-
 @job_bp.route('/update_job_list', methods=['POST'])
 def update_job_list():
     # Получаем данные от клиента
@@ -474,6 +479,7 @@ def update_job_list():
 
 # Функция для парсинга G-кода
 def make_gcode_parser():
+    print ("Func  def make_gcode_parser():")
     last = {'g': None, 'm': None, 'params': {}}
     base = {'X': 0, 'Y': 0, 'C': 0}  # Начальные значения для базовых координат
     
@@ -571,6 +577,7 @@ def get_last_two_numbers(s: str):
 
 # Функция для генерации SVG
 def generate_svg(paths, width, height, cutSeg=None):
+    print ("generate_svg")
     svg = etree.Element("svg", width=str(width), height=str(height), baseProfile="full", xmlns="http://www.w3.org/2000/svg")
     
     # Добавляем элемент defs для паттернов и маркеров
@@ -715,19 +722,14 @@ def generate_svg(paths, width, height, cutSeg=None):
 
 # Обработчик маршрута для получения G-code
 def gen_svg(resp, job_id, width, height):
+    print ("FUNC  def gen_svg")
     try:
         # Получаем G-code с внешнего API
         # Парсим полученные строки G-code
-        pattern = re.compile(r'<em>(\d+)</em><span>(.*?)</span>')  # Ищем содержимое между <em> и <span>
-        matches = re.findall(pattern, resp.text)
-        combined_results = [f"{em_value}{span_value}" for em_value, span_value in matches]
-
-        #print (combined_results)
-
-
+        combined_results = [item["text"] for item in resp]
         gcode_parser = make_gcode_parser()
         cmds = [gcode_parser(line) for line in combined_results]
-        #print("полученные команды:")
+        print("полученные команды:")
         #for cmd in cmds:
         #    print(cmd)
 
@@ -886,6 +888,7 @@ def gen_svg(resp, job_id, width, height):
                         paths[-1]['className'] += macros
 
         svg_data = generate_svg(paths, width, height)
+        #print ( svg_data )
         directory = f'./plans/{job_id}'
     
         # Создаем директорию, если она не существует

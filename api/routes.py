@@ -3,12 +3,14 @@ import os, json, re
 import requests
 import config
 import random
+import urllib.request
 
 api_bp = Blueprint("api", __name__)
 
 EXTERNAL_API = config.EXTERNAL_API
 TRANSLATIONS_DIR = "/home/woodver/salaser/src/scripts/translations"
 FUNCTIONS_FILE = "functions.json"
+PLANS_DIR = './plans'
 
 
 # Если файла нет — создаём пустой по умолчанию
@@ -17,36 +19,18 @@ if not os.path.exists(FUNCTIONS_FILE):
         json.dump([], f, ensure_ascii=False, indent=2)
 
 
-@api_bp.route("/loadresult", methods=["GET"])
-def get_load_result():
-    """Прокси для получения loadresult"""
-    try:
-        resp = requests.get(EXTERNAL_API + "/py/gcores[0].loadresult", timeout=5)
-        resp.raise_for_status()
-        data = resp.text.strip()
-        if not data:
-            return jsonify({"error": "Empty response"}), 502
-        return data
-    except requests.Timeout:
-        return jsonify({"error": "Request to external server timed out"}), 504
-    except requests.RequestException as e:
-        return jsonify({"error": f"External server error: {str(e)}"}), 502
-
-
-
 @api_bp.route("/listing", methods=["GET"])
 def get_listing():
     """Прокси для получения G-code listing"""
     try:
-        resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=5)
+        resp = requests.get(EXTERNAL_API + "/gcore/0/listing", timeout=20)
         resp.raise_for_status()
-        # возвращаем сырой текст (React ждёт именно текст)
+        # возвращаем сырой екст (React ждёт именно текст)
         return Response(resp.text, mimetype="text/plain")
     except requests.Timeout:
         return Response("Request to external server timed out", status=504, mimetype="text/plain")
     except requests.RequestException as e:
-        return Response(f"External server error: {str(e)}", status=502, mimetype="text/plain")
-    
+        return Response(f"External server error: {str(e)}", status=502, mimetype="text/plain") 
 
 
 @api_bp.route("/gcore/<int:core>/upload", methods=["POST"])
@@ -72,7 +56,6 @@ def upload_gcode(core: int):
         return jsonify({"status": "ok", "external_status": resp.status_code})
     except requests.RequestException as e:
         return jsonify({"error": f"External server error: {str(e)}"}), 502
-
 
 
 @api_bp.route("/cut-settings", methods=["GET", "PUT", "DELETE"])
@@ -105,8 +88,7 @@ def cut_settings():
         return jsonify({"error": "Внешний сервер не отвечает"}), 504
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
-    
-
+  
 
 @api_bp.route("/cut-settings-schema", methods=["GET"])
 def get_cut_settings_schema():
@@ -121,7 +103,6 @@ def get_cut_settings_schema():
         return jsonify({"error": "Внешний сервер не отвечает"}), 504
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
-    
 
 
 @api_bp.route("/gcore/<int:gcore_num>/execute", methods=["GET"])
@@ -138,7 +119,7 @@ def proxy_execute(gcore_num):
     except requests.RequestException as e:
         return jsonify({"error": f"Ошибка внешнего сервера: {str(e)}"}), 502
     
-
+# это не нужно
 def read_tsx_translations(file_path):
     """Читает объект из tsx-файла и возвращает словарь переводов"""
     translations = {}
@@ -152,6 +133,7 @@ def read_tsx_translations(file_path):
             translations[k] = v
     return translations
 
+# это не нужно 
 def write_tsx_translations(file_path, translations, lang):
     """Записывает словарь переводов обратно в tsx-файл"""
     lines = [f'const {lang}: Record<string, string> = {{']
@@ -161,6 +143,51 @@ def write_tsx_translations(file_path, translations, lang):
     lines.append(f'export default {lang};')
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+def read_jsx_translations(file_path: str) -> dict:
+    """Читает объект переводов из .jsx файла нового формата и возвращает словарь"""
+    translations = {}
+    
+    if not os.path.exists(file_path):
+        return translations
+    
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Ищем строки вида: "ключ": "значение",
+    # учитывая возможные пробелы, переносы и запятые в конце
+    matches = re.findall(r'^\s*"([^"]+)"\s*:\s*"([^"]*)"\s*,?$', content, re.MULTILINE)
+    
+    for key, value in matches:
+        translations[key] = value.strip()  # убираем лишние пробелы внутри значения
+    
+    return translations
+
+
+def write_jsx_translations(file_path: str, translations: dict, lang: str = "en"):
+    """
+    Записывает словарь переводов в .jsx файл.
+    Порядок ключей сохраняется точно как в переданном dict (без сортировки).
+    """
+    lines = [f"const {lang} = {{"]
+
+    items = list(translations.items())  # фиксируем порядок на момент вызова
+
+    for i, (key, value) in enumerate(items):
+        # Экранируем двойные кавычки в значении
+        escaped_value = value.replace('"', '\\"')
+        # Если это последний элемент — без запятой
+        comma = "" if i == len(items) - 1 else ","
+        lines.append(f'    "{key}": "{escaped_value}"{comma}')
+
+    lines.append("}")
+    lines.append(f"export default {lang};")
+    lines.append("")  # пустая строка в конце
+
+    with open(file_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+
 
 @api_bp.route("/translate", methods=["GET"])
 def translate_phrase():
@@ -172,11 +199,11 @@ def translate_phrase():
 
     # Перебираем все tsx-файлы в папке translations
     for filename in os.listdir(TRANSLATIONS_DIR):
-        if filename.endswith(".tsx"):
+        if filename.endswith(".jsx"):
             lang = filename.split(".")[0]
             file_path = os.path.join(TRANSLATIONS_DIR, filename)
 
-            translations = read_tsx_translations(file_path)
+            translations = read_jsx_translations(file_path)
 
             # Для английского просто дублируем
             if lang == "en":
@@ -196,7 +223,7 @@ def translate_phrase():
                     translations[phrase] = phrase
                     results[lang] = phrase
 
-            write_tsx_translations(file_path, translations, lang)
+            write_jsx_translations(file_path, translations, lang)
 
     return jsonify(results)
 
@@ -234,8 +261,6 @@ def save_functions():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
- 
-PLANS_DIR = './plans'
 
 @api_bp.route('/get_svg/<job_id>', methods=['GET'])
 def get_svg(job_id):
