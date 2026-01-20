@@ -912,11 +912,53 @@ def gen_svg(resp, job_id, width, height):
         return False
 
 
-
 @job_bp.route('/privet', methods=['GET'])
 def privet():
     print('Привет')
     return jsonify({
         "message": "Привет",
         "status": "success"
+    }), 200
+
+
+@job_bp.route('/get_ncp', methods=['POST', 'OPTIONS'])
+def get_ncp():
+    print('getting ncp')
+
+    # ✅ корректный ответ на preflight
+    #if request.method == 'OPTIONS':
+    #    resp = jsonify({})
+    #    resp.headers.add("Access-Control-Allow-Origin", "*")
+    #    resp.headers.add("Access-Control-Allow-Headers", "Content-Type")
+    #    resp.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+    #    return resp, 200
+
+    data = request.get_json(force=True)
+    if not data:
+        return jsonify({"error": "invalid json"}), 400
+
+    job_id = data.get("uuid")
+    if not job_id:
+        return jsonify({"error": "uuid is required"}), 400
+
+    job_folder = os.path.join("./plans", job_id)
+    if not os.path.isdir(job_folder):
+        return jsonify({"error": "job folder not found"}), 404
+
+    ncp_file_path = None
+    for filename in os.listdir(job_folder):
+        if filename.lower().endswith(".ncp"):
+            ncp_file_path = os.path.join(job_folder, filename)
+            break
+
+    if not ncp_file_path:
+        return jsonify({"error": "ncp file not found"}), 404
+
+    with open(ncp_file_path, "r", encoding="utf-8", errors="ignore") as f:
+        ncp_content = f.read()
+
+    return jsonify({
+        "uuid": job_id,
+        "filename": os.path.basename(ncp_file_path),
+        "content": ncp_content
     }), 200

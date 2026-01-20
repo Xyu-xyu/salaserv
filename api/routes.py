@@ -2,8 +2,8 @@ from flask import Blueprint, request, jsonify, send_from_directory, abort, Respo
 import os, json, re
 import requests
 import config
-import random
-import urllib.request
+import time
+
 
 api_bp = Blueprint("api", __name__)
 
@@ -17,6 +17,23 @@ PLANS_DIR = './plans'
 if not os.path.exists(FUNCTIONS_FILE):
     with open(FUNCTIONS_FILE, 'w', encoding='utf-8') as f:
         json.dump([], f, ensure_ascii=False, indent=2)
+
+        
+@api_bp.route("/loadresult", methods=["GET"])
+def get_load_result():
+    """Прокси для получения loadresult"""
+    try:
+        
+        resp = requests.get(EXTERNAL_API + "/gcore/0/result", timeout=5)
+        resp.raise_for_status()
+        data = resp.text.strip()
+        if not data:
+            return jsonify({"error": "Empty response"}), 502
+        return data
+    except requests.Timeout:
+        return jsonify({"error": "Request to external server timed out"}), 504
+    except requests.RequestException as e:
+        return jsonify({"error": f"External server error: {str(e)}"}), 502
 
 
 @api_bp.route("/listing", methods=["GET"])
