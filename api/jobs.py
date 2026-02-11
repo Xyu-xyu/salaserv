@@ -214,7 +214,7 @@ def upload_files():
 
             height = job_data["dimY"]
             width = job_data["dimX"]
-            time.sleep(5)  
+            time.sleep(3)  
             url = EXTERNAL_API + "/gcore/1/listing.json"
             r = requests.get(url, timeout=(2, 60), headers={"Connection": "close"})
             if r.status_code == 200:
@@ -1065,6 +1065,148 @@ def update_ncp():
         return jsonify({
             "status": "success",
             "loadResult": load_result
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@job_bp.route('/create_from_ncp', methods=['POST', 'OPTIONS'])
+def create_from_ncp():
+
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
+    try:
+        data = request.get_json(force=True)
+
+        # -----------------------
+        # 1. входные данные
+        # -----------------------
+        ncp_text = data.get("file")
+        name = data.get("name")
+        dimX = data.get("dimX")
+        dimY = data.get("dimY")
+        material = data.get("material")
+        materialLabel = data.get("materialLabel")
+        preset_id = data.get("preset")
+        quantity = data.get("quantity")
+
+        if not ncp_text:
+            return jsonify({"error": "ncp text required"}), 400
+
+        job_id = str(uuid.uuid4())
+        now = datetime.datetime.now()
+
+        # -----------------------
+        # 2. запись в БД (как upload_files)
+        # -----------------------
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO jobs (
+                id, dimX, dimY, material, materialLabel, name, preset, quantity,
+                created_at, updated_at, loadResult, status, is_cutting, array_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            job_id, dimX, dimY, material, materialLabel, name, preset_id,
+            quantity, now, now, "", 0, 0, get_last_in_status(0)
+        ))
+
+        conn.commit()
+        conn.close()
+
+        # -----------------------
+        # 3. создаём папку
+        # -----------------------
+        job_folder = os.path.join("./plans", job_id)
+        os.makedirs(job_folder, exist_ok=True)
+
+        # -----------------------
+        # 4. создаём *.ncp файл
+        # -----------------------
+        file_path = os.path.join(job_folder, f"{name}.ncp")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(ncp_text)
+
+        # -----------------------
+        # 5. получаем preset
+        # -----------------------
+        conn = sqlite3.connect(DB_PATH_PRESET)
+        c = conn.cursor()
+        c.execute(
+            "SELECT preset FROM presets WHERE id=?",
+            (preset_id,)
+        )
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({"error": "preset not found"}), 404
+
+        preset_json = json.loads(row[0])
+
+        # -----------------------
+        # 6. отправляем preset
+        # -----------------------
+        requests.put(
+            f"{EXTERNAL_API}/cut_settings/settings",
+            params={"gcore": 1},
+            json=preset_json,
+            timeout=5
+        ).raise_for_status()
+
+        # -----------------------
+        # 7. upload ncp
+        # -----------------------
+        with open(file_path, "rb") as f:
+            requests.post(
+                f"{EXTERNAL_API}/gcore/1/upload",
+                data=f.read(),
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=10
+            ).raise_for_status()
+
+        # -----------------------
+        # 8. loadResult
+        # -----------------------
+        resp = requests.get(EXTERNAL_API + "/gcore/1/result", timeout=5)
+        resp.raise_for_status()
+        load_result = resp.json()
+
+        # -----------------------
+        # 9. обновление БД
+        # -----------------------
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            UPDATE jobs
+            SET loadResult=?, updated_at=?
+            WHERE id=?
+        """, (
+            json.dumps(load_result),
+            datetime.datetime.now(),
+            job_id
+        ))
+        conn.commit()
+        conn.close()
+
+        # -----------------------
+        # 10. генерация svg
+        # -----------------------
+        time.sleep(3)
+        r = requests.get(EXTERNAL_API + "/gcore/1/listing.json", timeout=(2, 60))
+        svg = gen_svg(r.json(), job_id, dimX, dimY)
+
+        if not svg:
+            return jsonify({"error": "svg failed"}), 500
+
+        return jsonify({
+            "status": "success",
+            "job_id": job_id,
+            "load_result": load_result
         }), 200
 
     except Exception as e:
