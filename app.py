@@ -39,89 +39,78 @@ background_task_started = False
 
 def generate_machine_data():
     """Фоновый таск, отправляет данные каждые 1 сек"""
-    while True:
-        exec_line = None  # ← будем брать из статистики, если получится
-
+    def safe_axis(servos, idx):
+        """Возвращает словарь с position и inputs, даже если данных нет"""
         try:
-            # Сначала пытаемся взять статистику — там есть exec_line
-            resp_stat = requests.get(f"{EXTERNAL_API}/servo/statistic", timeout=1)
-            resp_stat.raise_for_status()
-            stat_data = resp_stat.json()
-            exec_line = stat_data.get("ycoe", {}).get("exec_line", 0)
+            axis = servos[idx]
+            return {
+                "position": axis.get("position", 0),
+                "inputs": axis.get("inputs", {})
+            }
+        except Exception:
+            return {"position": 0, "inputs": {}}
 
-            # Теперь динамика (позиции осей)
-            resp = requests.get(f"{EXTERNAL_API}/servo/dynamic", timeout=1)
+    def fetch_json(url, default=None, timeout=1):
+        """Безопасный GET-запрос, возвращает default при ошибке"""
+        try:
+            resp = requests.get(url, timeout=timeout)
             resp.raise_for_status()
-            servo_data = resp.json()
-            servo_X = servo_data[1]
-            servo_Y = servo_data[2]
-            servo_Z = servo_data[3]
+            return resp.json()
+        except Exception:
+            return default
 
-            # Функция-хелпер: проверяет, активен ли концевик (нажат ли он сейчас)
-            def is_limit_active(current_pos, limit_value):
-                if limit_value is False:        # концевик не настроен
-                    return False
-                if not isinstance(limit_value, (int, float)):  # на всякий случай
-                    return False
-                return current_pos >= limit_value if 'plus' in locals() or 'NOT' in str(limit_value) else current_pos <= limit_value
-                # Но лучше явно: NOT — это +лимит, POT — это -лимит
+    while True:
+        # Начальные значения
+        exec_line = 0
+        data = []
 
-            # Более читаемый и надёжный вариант:
-            def limit_plus_active(pos, not_val):
-                return int(isinstance(not_val, (int, float)) and pos >= not_val)
+        # Получаем статистику
+        stat_data = fetch_json(f"{EXTERNAL_API}/servo/statistic", default={})
+        exec_line = stat_data.get("ycoe", {}).get("exec_line", 0)
 
-            def limit_minus_active(pos, pot_val):
-                return int(isinstance(pot_val, (int, float)) and pos <= pot_val)
+        # Получаем динамику сервоприводов
+        servo_data = fetch_json(f"{EXTERNAL_API}/servo/dynamic", default={"servos": []})
+        servos = servo_data.get("servos", [])
 
-            # Состояния концевиков (True — нажат/достигнут, False — не достигнут или не настроен)
-            limitXplus  = limit_plus_active(servo_X["position"],  servo_X["inputs"]["NOT"])
-            limitXminus = limit_minus_active(servo_X["position"], servo_X["inputs"]["POT"])
+        # Получаем оси
+        servo_X = safe_axis(servos, 1)
+        servo_Y = safe_axis(servos, 2)
+        servo_Z = safe_axis(servos, 3)
 
-            limitYplus  = limit_plus_active(servo_Y["position"],  servo_Y["inputs"]["NOT"])
-            limitYminus = limit_minus_active(servo_Y["position"], servo_Y["inputs"]["POT"])
+        # Концевики
+        limitXplus  = int(servo_X["inputs"].get("NOT", False))
+        limitXminus = int(servo_X["inputs"].get("POT", False))
 
-            limitZplus  = limit_plus_active(servo_Z["position"],  servo_Z["inputs"]["NOT"])
-            limitZminus = limit_minus_active(servo_Z["position"], servo_Z["inputs"]["POT"])
+        limitYplus  = int(servo_Y["inputs"].get("NOT", False))
+        limitYminus = int(servo_Y["inputs"].get("POT", False))
 
-            data = [
-                {"name": "X",           "measure": "mm",      "val": round(servo_X["position"], 2)},
-                {"name": "Y",           "measure": "mm",      "val": round(servo_Y["position"], 2)},
-                {"name": "Z",           "measure": "mm",      "val": round(servo_Z["position"], 2)},
-                {"name": "limitXplus",  "measure": "boolean", "val": limitXplus},
-                {"name": "limitXminus", "measure": "boolean", "val": limitXminus},
-                {"name": "limitYplus",  "measure": "boolean", "val": limitYplus},
-                {"name": "limitYminus", "measure": "boolean", "val": limitYminus},
-                {"name": "limitZplus",  "measure": "boolean", "val": limitZplus},
-                {"name": "limitZminus", "measure": "boolean", "val": limitZminus},
-                {"name": "exec_line",   "measure": "num",     "val": int(exec_line) if exec_line else 0},
-                {"name": "N2",          "measure": "bar",     "val": round(random.uniform(0, 1))},
-                {"name": "Nd",          "measure": "mm",      "val": round(random.uniform(0, 1))},
-                {"name": "f",           "measure": "kHz",     "val": round(random.uniform(0, 1))},
-            ]
+        limitZplus  = int(servo_Z["inputs"].get("NOT", False))
+        limitZminus = int(servo_Z["inputs"].get("POT", False))
 
-        except (requests.RequestException, IndexError, KeyError, AttributeError):
-            # Если хоть один запрос упал — делаем заглушку
-            data = [
-                {"name": "X",           "measure": "mm",     "val": round(random.uniform(0, 300), 2)},
-                {"name": "Y",           "measure": "mm",      "val": round(random.uniform(0, 1500), 2)},
-                {"name": "Z",           "measure": "mm",      "val": round(random.uniform(0, 30), 2)},
-                {"name": "exec_line",   "measure": "num",     "val": 0},
-                {"name": "limitXplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "limitXminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "limitYplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "limitYminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "limitZplus",  "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "limitZminus", "measure": "boolean", "val": round(random.uniform(0, 1))},
-                {"name": "N2",          "measure": "bar",     "val": round(random.uniform(0, 1))},
-                {"name": "Nd",          "measure": "mm",      "val": round(random.uniform(0, 1))},
-                {"name": "f",           "measure": "kHz",     "val": round(random.uniform(0, 1))},
-                ##{"name": "exec_line", "measure": "num", "val": round(random.uniform(0, 1000))}
-            ]
 
-        # Отправляем клиентам
+        # Если оси пустые — используем заглушки
+        def random_val(scale=1):
+            return round(random.uniform(0, scale), 2)
+
+        data = [
+            {"name": "X",           "measure": "mm",      "val": servo_X["position"]},
+            {"name": "Y",           "measure": "mm",      "val": servo_Y["position"]},
+            {"name": "Z",           "measure": "mm",      "val": servo_Z["position"]},
+            {"name": "limitXplus",  "measure": "boolean", "val": limitXplus},
+            {"name": "limitXminus", "measure": "boolean", "val": limitXminus},
+            {"name": "limitYplus",  "measure": "boolean", "val": limitYplus},
+            {"name": "limitYminus", "measure": "boolean", "val": limitYminus},
+            {"name": "limitZplus",  "measure": "boolean", "val": limitZplus},
+            {"name": "limitZminus", "measure": "boolean", "val": limitZminus},
+            {"name": "exec_line",   "measure": "num",     "val": exec_line},
+            {"name": "N2",          "measure": "bar",     "val": 0},
+            {"name": "Nd",          "measure": "mm",      "val": 0},
+            {"name": "f",           "measure": "kHz",     "val": 0},
+        ]
+
+        # Отправляем клиентам через socketio
         socketio.emit("machine_data", data)
         socketio.sleep(1)
-
 
 @socketio.on("connect")
 def handle_connect():
