@@ -3,7 +3,7 @@ import sqlite3
 import time
 import uuid
 import datetime
-import os, json
+import os, json, shutil
 import config
 import requests
 import shutil
@@ -289,29 +289,37 @@ def clear_all():
 @job_bp.route('/delete_job', methods=['POST'])
 def delete_job():
     try:
-        # Получаем данные из запроса
         data = request.get_json(force=True)
 
-        # Проверяем обязательный параметр
         if 'id' not in data:
             return jsonify({"error": "Missing required parameter: id"}), 400
 
-        job_id = data['id']
+        job_id = str(data['id'])
 
-        # Удаляем запись
+        # --- Удаляем запись из БД ---
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        query = "DELETE FROM jobs WHERE id = ?"
-        cursor.execute(query, (job_id,))
+        cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         conn.commit()
 
         rows_affected = cursor.rowcount
         conn.close()
 
-        # Проверяем, была ли запись удалена
         if rows_affected == 0:
             return jsonify({"error": "Job not found"}), 404
+
+        # --- Удаляем папку ---
+        plans_dir = os.path.join(os.getcwd(), "plans")
+        job_folder = os.path.join(plans_dir, job_id)
+
+        # Защита от path traversal !!!
+        job_folder = os.path.abspath(job_folder)
+        if not job_folder.startswith(os.path.abspath(plans_dir)):
+            return jsonify({"error": "Invalid folder path"}), 400
+
+        if os.path.exists(job_folder):
+            shutil.rmtree(job_folder)
 
         return jsonify({
             "message": f"Job with id={job_id} deleted successfully",
@@ -320,13 +328,12 @@ def delete_job():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
+    
 @job_bp.route('/get_jobs', methods=['GET'])
 def get_jobs():
     try:
         # Получаем параметры из запроса
-        limit = int(request.args.get('limit', 10))  # Количество записей на странице, по умолчанию 10
+        limit = int(request.args.get('limit', 20))  # Количество записей на странице, по умолчанию 10
         offset = int(request.args.get('offset', 0))  # Смещение для пагинации, по умолчанию 0
         status = request.args.get('status')  # Фильтр по статусу
         start_date = request.args.get('start_date')  # Фильтр по дате начала (формат: 'YYYY-MM-DD')
