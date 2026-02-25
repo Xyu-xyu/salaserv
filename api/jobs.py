@@ -972,13 +972,14 @@ def get_ncp():
 
 
 @job_bp.route('/update_ncp', methods=['POST', 'OPTIONS'])
+@job_bp.route('/update_ncp', methods=['POST', 'OPTIONS'])
 def update_ncp():
-
     try:
         data = request.get_json(force=True)
 
         job_id = data.get("uuid")
         ncp_content = data.get("content")
+        params_json = data.get("params")  # <-- новое поле
 
         if not job_id or not ncp_content:
             return jsonify({"error": "uuid and content required"}), 400
@@ -988,23 +989,53 @@ def update_ncp():
             return jsonify({"error": "job folder not found"}), 404
 
         # -----------------------------
-        # 1️⃣ найти или создать ncp файл
+        # 1️⃣ Найти или создать ncp файл
         # -----------------------------
         ncp_path = None
         for f in os.listdir(job_folder):
             if f.lower().endswith(".ncp"):
                 ncp_path = os.path.join(job_folder, f)
                 break
-
         if not ncp_path:
             ncp_path = os.path.join(job_folder, f"{job_id}.ncp")
 
-        # перезапись файла
+        # Перезапись файла
         with open(ncp_path, "w", encoding="utf-8") as f:
             f.write(ncp_content)
 
         # -----------------------------
-        # 2️⃣ отправка в gcore
+        # 1.1 Обновление дополнительных параметров из params
+        # -----------------------------
+        if params_json:
+            try:
+                params_data = json.loads(params_json)
+            except Exception:
+                return jsonify({"error": "Invalid JSON in params"}), 400
+
+            # Определяем допустимые поля
+            valid_params = [
+                'status', 'dimX', 'dimY', 'material', 'materialLabel', 'name',
+                'preset', 'quantity', 'loadResult', 'array_id', 'is_cutting'
+            ]
+
+            updates = []
+            values = []
+            for key, val in params_data.items():
+                if key in valid_params:
+                    updates.append(f"{key} = ?")
+                    values.append(val)
+            if updates:
+                query = f"UPDATE jobs SET {', '.join(updates)}, updated_at = ? WHERE id = ?"
+                values.append(datetime.datetime.now())
+                values.append(job_id)
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute(query, values)
+                conn.commit()
+                conn.close()
+
+        # -----------------------------
+        # 2️⃣ Отправка в gcore
         # -----------------------------
         with open(ncp_path, 'rb') as f:
             file_bytes = f.read()
@@ -1019,18 +1050,17 @@ def update_ncp():
         resp.raise_for_status()
 
         # -----------------------------
-        # 3️⃣ получить новый loadResult
+        # 3️⃣ Получение нового loadResult
         # -----------------------------
         resp = requests.get(EXTERNAL_API + "/gcore/1/result", timeout=5)
         resp.raise_for_status()
         load_result = resp.json()
 
         # -----------------------------
-        # 4️⃣ обновить БД
+        # 4️⃣ Обновление loadResult в базе
         # -----------------------------
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-
         c.execute("""
             UPDATE jobs
             SET loadResult = ?, updated_at = ?
@@ -1043,7 +1073,7 @@ def update_ncp():
 
         conn.commit()
 
-        # получаем размеры для svg
+        # Получаем размеры для svg
         c.execute("SELECT dimX, dimY FROM jobs WHERE id=?", (job_id,))
         row = c.fetchone()
         conn.close()
@@ -1051,7 +1081,7 @@ def update_ncp():
         width, height = row
 
         # -----------------------------
-        # 5️⃣ пересоздание svg
+        # 5️⃣ Пересоздание svg
         # -----------------------------
         time.sleep(3)
 
@@ -1076,7 +1106,7 @@ def update_ncp():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+    
 
 @job_bp.route('/create_from_ncp', methods=['POST', 'OPTIONS'])
 def create_from_ncp():
