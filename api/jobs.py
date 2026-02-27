@@ -602,7 +602,7 @@ def generate_svg(paths, width, height, cutSeg=None):
     style = etree.SubElement(defs, "style")
     style.text = '''    
         .sgn_main_els .g4 {
-        stroke: var(--red);           
+        stroke: red;           
         stroke-width: 1.5px;         
         fill: none;
         marker-end: none;
@@ -631,7 +631,7 @@ def generate_svg(paths, width, height, cutSeg=None):
     }
 
     .sgn_main_els .laserOff {
-        stroke: var(--violet);
+        stroke: violet;
         stroke-width: 1px;
         fill: none;
         stroke-dasharray: 4 2; 
@@ -866,7 +866,7 @@ def gen_svg(resp, job_id, width, height):
                         x = cx
                         y = cy
 
-                    cross_path = cross(x, y, 2.5, c, height)
+                    cross_path = cross( tx + c['base'].get('X', 0), ty+ c['base'].get('Y', 0), 2.5, c, height )
                     cross_obj = {
                         'path': cross_path,
                         'n': [c.get('n', 0), c.get('n', 0)],  # n ?? 0 → если n нет, то 0
@@ -971,7 +971,6 @@ def get_ncp():
     }), 200
 
 
-@job_bp.route('/update_ncp', methods=['POST', 'OPTIONS'])
 @job_bp.route('/update_ncp', methods=['POST', 'OPTIONS'])
 def update_ncp():
     try:
