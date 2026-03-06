@@ -17,6 +17,82 @@ DB_PATH = "jobs1.db"
 DB_PATH_PRESET = "preset.db"
 job_bp = Blueprint("jdb", __name__)
 EXTERNAL_API = config.EXTERNAL_API
+LASER_CONNECTED = config.LASER_CONNECTED
+
+
+import re
+from lxml import etree
+
+def gen_svg_from_ncp(file_data: str, width: float, height: float):
+    """
+    Парсит NCP файл (base64) и генерирует SVG с квадратами 10x10
+    на позициях из G52 внутри блока <Plan> ... </Plan>.
+    Поддержка: если X, Y, L, C отсутствуют, используем предыдущие значения.
+    """
+    data = base64.b64decode(file_data).decode('utf-8')
+    lines = data.splitlines()
+
+    plan_lines = []
+    in_plan = False
+
+    # Ищем блок <Plan> ... </Plan>
+    for line in lines:
+        line = line.strip()
+        if "<Plan" in line:
+            in_plan = True
+            continue
+        if "</Plan>" in line:
+            in_plan = False
+            continue
+        if in_plan:
+            # Берем только G52 строки
+            if re.search(r'G52', line):
+                plan_lines.append(line)
+
+    positions = []
+    last = {'X': 0, 'Y': 0, 'L': 1, 'C': 0}
+
+    for line in plan_lines:
+        x_match = re.search(r'X(-?\d+\.?\d*)', line)
+        y_match = re.search(r'Y(-?\d+\.?\d*)', line)
+        l_match = re.search(r'L(-?\d+)', line)
+        c_match = re.search(r'C(-?\d+\.?\d*)', line)
+
+        # Используем предыдущие значения, если текущие отсутствуют
+        last['X'] = float(x_match.group(1)) if x_match else last['X']
+        last['Y'] = float(y_match.group(1)) if y_match else last['Y']
+        last['L'] = int(l_match.group(1)) if l_match else last['L']
+        last['C'] = float(c_match.group(1)) if c_match else last['C']
+
+        positions.append(last.copy())
+
+    # Формируем SVG
+    svg = []
+    svg.append(f'<svg viewBox="0 0 {width} {height}" class="planSvg" xmlns="http://www.w3.org/2000/svg">')
+    svg.append('  <g id="contours">')
+
+    # defs с одной деталью 10x10
+    svg.append('    <defs>')
+    svg.append('      <g id="part_1">')
+    svg.append('        <rect width="10" height="10" fill="none" stroke="black"/>')
+    svg.append('      </g>')
+    svg.append('    </defs>')
+
+    # use для каждой позиции
+    for i, pos in enumerate(positions, 1):
+        x, y, c, l = pos['X'], pos['Y'], pos['C'], pos['L']
+        # Трансформация: смещение и поворот по C
+        svg.append(f'    <g transform="translate({x},{y}) rotate({c})" data-part-id="{l}">')
+        svg.append('      <use href="#part_1" fill="var(--violetTransparent)" stroke="var(--violetTransparent)"/>')
+        svg.append('    </g>')
+
+    svg.append('  </g>')
+    svg.append('</svg>')
+
+    return "\n".join(svg)
+
+
+
 
 
 def create_table():
@@ -181,57 +257,85 @@ def upload_files():
                 "status": row[6],
             }
 
-            # 2. Отправляем полученный пресет на внешний сервер (PUT)
-            url = f"{EXTERNAL_API}/cut_settings/settings"
-            resp = requests.put(url, params={"gcore": 0}, json=preset_data["preset"], timeout=5)
-            resp.raise_for_status()  # Проверка на ошибку
+            if LASER_CONNECTED:
+                # 2. Отправляем полученный пресет на внешний сервер (PUT)
+                url = f"{EXTERNAL_API}/cut_settings/settings"
+                resp = requests.put(url, params={"gcore": 0}, json=preset_data["preset"], timeout=5)
+                resp.raise_for_status()  # Проверка на ошибку
 
-            # 3. Отправляем файл на внешний сервер (POST)
-            url = f"{EXTERNAL_API}/gcore/1/upload"
-            with open(file_path, 'rb') as f:
-                file_content = f.read()
+                # 3. Отправляем файл на внешний сервер (POST)
+                url = f"{EXTERNAL_API}/gcore/1/upload"
+                with open(file_path, 'rb') as f:
+                    file_content = f.read()
 
-            resp = requests.post(url, data=file_content, headers={"Content-Type": "application/octet-stream"}, timeout=10)
-            resp.raise_for_status()
+                resp = requests.post(url, data=file_content, headers={"Content-Type": "application/octet-stream"}, timeout=10)
+                resp.raise_for_status()
 
-            # 4. Получаем результат и сохраняем его в базу данных
-            resp = requests.get(EXTERNAL_API + "/gcore/1/result", timeout=5)
-            resp.raise_for_status()
-            load_result = resp.json()  # Предполагается, что ответ в формате JSON
-            #print("load_result ???")
-            #print(load_result)
+                # 4. Получаем результат и сохраняем его в базу данных
+                resp = requests.get(EXTERNAL_API + "/gcore/1/result", timeout=5)
+                resp.raise_for_status()
+                load_result = resp.json()  # Предполагается, что ответ в формате JSON
+                #print("load_result ???")
+                #print(load_result)
 
-            # Обновляем запись в базе данных с результатом загрузки
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("""
-                UPDATE jobs
-                SET loadResult = ?, status = 0, updated_at = ?
-                WHERE id = ?
-            """, (json.dumps(load_result), datetime.datetime.now(), job_id))
-            conn.commit()
-            conn.close()
+                # Обновляем запись в базе данных с результатом загрузки
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("""
+                    UPDATE jobs
+                    SET loadResult = ?, status = 0, updated_at = ?
+                    WHERE id = ?
+                """, (json.dumps(load_result), datetime.datetime.now(), job_id))
+                conn.commit()
+                conn.close()
 
-            height = job_data["dimY"]
-            width = job_data["dimX"]
-            time.sleep(3)  
-            url = EXTERNAL_API + "/gcore/1/listing.json"
-            r = requests.get(url, timeout=(2, 60), headers={"Connection": "close"})
-            if r.status_code == 200:
-                data = r.json()       
-                svg = gen_svg(data, job_id, width, height)
-            if svg:
-            # Возвращаем успешный ответ
-                return jsonify({
-                    "message": "File uploaded and processed successfully",
-                    "job_id": job_id,
-                    "file_path": file_path,
-                    "load_result": load_result
-                }), 200
+                height = job_data["dimY"]
+                width = job_data["dimX"]
+                time.sleep(3)  
+                url = EXTERNAL_API + "/gcore/1/listing.json"
+                r = requests.get(url, timeout=(2, 60), headers={"Connection": "close"})
+                if r.status_code == 200:
+                    data = r.json()       
+                    svg = gen_svg(data, job_id, width, height)
+                if svg:
+                # Возвращаем успешный ответ
+                    return jsonify({
+                        "message": "File uploaded and processed successfully",
+                        "job_id": job_id,
+                        "file_path": file_path,
+                        "load_result": load_result
+                    }), 200
+                else:
+                    return jsonify({
+                        "error": "error in saving svg",
+                    }), 500
+                
             else:
-                return jsonify({
-                    "error": "error in saving svg",
-                }), 500
+                print ("GENERATE SVG FROM NCP")
+                height = job_data["dimY"]
+                width = job_data["dimX"]
+                svg_data = gen_svg_from_ncp(file_string, width, height)
+                directory = f'./plans/{job_id}'
+
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+
+                file_path = os.path.join(directory, 'img.svg')
+
+                with open(file_path, 'w') as file:
+                    file.write(svg_data)
+                if svg_data:
+                # Возвращаем успешный ответ
+                    return jsonify({
+                        "message": "File uploaded and processed successfully",
+                        "job_id": job_id,
+                        "file_path": file_path,
+                    }), 200
+                else:
+                    return jsonify({
+                        "error": "error in saving svg",
+                    }), 500
+                                
                 
         else:
             return jsonify({"message": "No file uploaded"}), 400
